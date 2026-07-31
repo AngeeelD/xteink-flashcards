@@ -174,8 +174,10 @@ def _generate_bmps_per_chapter(
     enriched_csv_outdir: Path,
     sd: StarDict,
     update_status,
+    darkmode: bool = False,
 ) -> tuple[int, int]:
-    """Per-chapter enrichment + BMP rendering."""
+    """Per-chapter enrichment + BMP rendering. If darkmode=True, BMPs are
+    rendered inverted (black bg, white fg)."""
     bmp_outdir.mkdir(parents=True, exist_ok=True)
     enriched_csv_outdir.mkdir(parents=True, exist_ok=True)
     source_lang = LANG_NAMES.get(source, source)
@@ -183,8 +185,10 @@ def _generate_bmps_per_chapter(
     written = 0
     for i, (stem, internal) in enumerate(chapters, start=1):
         update_status(
-            phase="bmp",
-            phase_label=f"Enriching + rendering BMPs ({i}/{total}: {stem})",
+            phase="bmp_dark" if darkmode else "bmp",
+            phase_label=(
+                f"{'Dark mode' if darkmode else 'Light mode'} BMPs ({i}/{total}: {stem})"
+            ),
             chapters_done=i - 1,
             chapters_total=total,
         )
@@ -253,11 +257,12 @@ def _generate_bmps_per_chapter(
             except Exception as e:
                 print(f"[job] examples failed for {stem}: {e}")
 
-        # 4) write enriched CSV
+        # 4) write enriched CSV (only once — re-use between light and dark)
         num = re.search(r"(\d+)", stem)
         num_s = num.group(1).zfill(3) if num else f"{i:03d}"
         enriched_csv_path = enriched_csv_outdir / f"chapter_{num_s}.csv"
-        write_enriched_csv(enriched_csv_path, enriched, append=False)
+        if not enriched_csv_path.exists():
+            write_enriched_csv(enriched_csv_path, enriched, append=False)
 
         # 5) render BMPs
         for j, row in enumerate(enriched):
@@ -273,6 +278,7 @@ def _generate_bmps_per_chapter(
                     page_no=j + 1,
                     total_pages=len(enriched),
                     output_path=bmp_path,
+                    darkmode=darkmode,
                 )
             except Exception as e:
                 print(f"[job] bmp render failed for {row['word']}: {e}")
@@ -362,10 +368,7 @@ def _run_job(job_id: str, config: dict) -> None:
             sd = StarDict(dict_dir)
             update(stardict_words=sd.wordcount)
 
-            # Temporarily monkey-patch OLLAMA_HOST inside enrich_flashcards ollama calls
-            # by re-binding the module's ollama_generate to use our host.
-            # Simpler: we already pass OLLAMA_MODEL explicitly in the helpers above.
-
+            # Pass B1: light-mode BMPs (always)
             bmp_written, _ = _generate_bmps_per_chapter(
                 epub_path, chapters,
                 source=source,
@@ -375,11 +378,32 @@ def _run_job(job_id: str, config: dict) -> None:
                 enriched_csv_outdir=enriched_csv_dir,
                 sd=sd,
                 update_status=update,
+                darkmode=False,
             )
-            update(phase="zipping", phase_label=f"Zipping {bmp_written} BMPs…")
+            update(phase="zipping", phase_label=f"Zipping {bmp_written} light BMPs…")
             zip_path = job_dir / "screensaver.zip"
             n = _zip_dir(bmp_dir, zip_path)
             update(screensaver_zip=f"jobs/{job_id}/screensaver.zip", bmp_count=n)
+
+            # Pass B2: dark-mode BMPs (only if requested).
+            if config.get("darkmode"):
+                dark_bmp_dir = job_dir / "bmp_dark"
+                bmp_dark_written, _ = _generate_bmps_per_chapter(
+                    epub_path, chapters,
+                    source=source,
+                    items=config["items"],
+                    with_examples=config.get("with_examples", False),
+                    bmp_outdir=dark_bmp_dir,
+                    enriched_csv_outdir=enriched_csv_dir,  # re-use (skip if exists)
+                    sd=sd,
+                    update_status=update,
+                    darkmode=True,
+                )
+                update(phase="zipping", phase_label=f"Zipping {bmp_dark_written} dark BMPs…")
+                dark_zip_path = job_dir / "screensaver_dark.zip"
+                nd = _zip_dir(dark_bmp_dir, dark_zip_path)
+                update(screensaver_dark_zip=f"jobs/{job_id}/screensaver_dark.zip",
+                       bmp_dark_count=nd)
 
         # ---------- Done ----------
         meta = _read_meta(job_id)
@@ -447,6 +471,7 @@ def upload():
             "end": request.form.get("end") or None,
             "generate_csv": request.form.get("generate_csv") == "on",
             "generate_bmp": request.form.get("generate_bmp") == "on",
+            "darkmode": request.form.get("darkmode") == "on",
             "with_examples": request.form.get("with_examples") == "on",
             "original_filename": epub.filename,
             "uploaded_at": _now_iso(),

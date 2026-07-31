@@ -1,13 +1,29 @@
-# Xteink Flashcards — Epub → Bilingual CSVs + E-ink Screen Saver BMPs
+# Xteink Flashcards
 
-A local web service (Flask + Ollama + StarDict) that converts an epub into:
+**Turn any epub into per-chapter flashcards and 528×792 e-ink screensaver BMPs for a [Xteink X3](https://www.xteink.com/) reader.**
 
-1. **`flashcards.zip`** — per-chapter bilingual CSV files (`English,Spanish` or `Spanish,English`) ready to drop on a Xteink X3 e-reader for vocabulary study.
-2. **`screensaver.zip`** — per-chapter BMPs sized `528×792` portrait, 1-bit monochrome, styled as dictionary entries with word, pronunciation (IPA), definition, usage, synonyms. Designed as lock-screen / sleep images for the e-reader.
+A self-hosted pipeline (Flask + [Ollama](https://ollama.com) + [StarDict](https://en.wikipedia.org/wiki/StarDict)) that runs entirely on your own machine — no cloud, no API keys, no data leaves your network.
 
-Built to run on a Mac mini (or any Linux/macOS host) with Ollama installed locally and the StarDict dictionaries cloned into this directory.
+## What it produces
 
----
+Upload an epub. Pick your languages. Get back **one or both** of:
+
+| Output | Format | What it is |
+|---|---|---|
+| `flashcards.zip` | per-chapter CSV (`English,Spanish`) | Bilingual flashcards ready to drop on the Xteink's `/flashcards/` folder. |
+| `screensaver.zip` | per-chapter BMP (528×792, 1-bit) | Lock-screen images with IPA pronunciation, definition, usage, synonyms — dictionary-entry style. Optionally a second `screensaver_dark.zip` for OLED devices. |
+
+Each archive is regenerated from scratch on every run, so you can iterate freely while reading.
+
+## Why it exists
+
+Off-the-shelf e-readers don't have a great vocabulary-acquisition workflow. The Xteink X3 supports dictionary lookup and a sleep-image screensaver, but neither learns your book. This tool bridges that gap by:
+
+1. Asking a local LLM to extract **C1–C2 vocabulary** from each chapter.
+2. Falling back to **StarDict** for definitions, IPA pronunciation and synonyms (no LLM hallucinated definitions).
+3. Laying everything out on the e-ink screen as if it were a personalised dictionary.
+
+It's the system the author uses to work through Spanish/English technical books on their own Xteink.
 
 ## Architecture
 
@@ -145,3 +161,16 @@ phase + per-chapter progress.
 - All processing runs inside the container; nothing is uploaded to the cloud.
 - The StarDict files are small (~5 MB each) so we COPY them into the image
   instead of mounting — no need for bind mounts that drift out of sync.
+
+## Data & licensing
+
+- The bundled **StarDict** dictionaries (`wikdict-en-es/`, `wikdict-es-en/`) come from
+  [wikdict.com](http://www.wikdict.com/) (FreeDict + Wiktionary via DBnary) and are
+  licensed under **CC BY-SA 4.0**. Attribution is preserved in each `.ifo` file.
+- The **Python code** (scripts, webapp, Docker setup, docs) is released under the
+  [MIT License](./LICENSE).
+
+## License
+
+[MIT](./LICENSE) — do whatever you like, attribution appreciated.
+

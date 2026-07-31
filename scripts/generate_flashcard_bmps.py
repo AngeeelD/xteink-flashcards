@@ -29,8 +29,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 528
 HEIGHT = 792
-BG = 255   # white
-FG = 0     # black
+BG_LIGHT = 255   # white background (light mode)
+BG_DARK = 0      # black background (dark mode)
+FG_LIGHT = 0     # black text (light mode)
+FG_DARK = 255    # white text (dark mode)
 
 OUTER_MARGIN = 18
 CARD_PADDING = 24
@@ -145,7 +147,7 @@ def truncate_lines(text: str, font: ImageFont.FreeTypeFont,
 
 
 def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH,
-                       fill: int = FG, shadow: bool = False, dy: int = 1) -> int:
+                       fill: int = 0, shadow: bool = False, dy: int = 1) -> int:
     text = text.strip()
     if not text:
         return y
@@ -159,7 +161,7 @@ def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH,
 
 
 def draw_section_title(draw, text: str, font, y: int,
-                       x_left: int, x_right: int, fill: int = FG) -> int:
+                       x_left: int, x_right: int, fill: int = 0) -> int:
     """Section title in caps, centered between x_left and x_right, with thin rule below."""
     text = text.upper()
     w, h = measure(text, font)
@@ -174,7 +176,7 @@ def draw_section_title(draw, text: str, font, y: int,
 
 
 def draw_body_lines(draw, lines: list[str], font, x: int, y: int,
-                    max_width: int, line_spacing: int = 6, fill: int = FG,
+                    max_width: int, line_spacing: int = 6, fill: int = 0,
                     italic: bool = False) -> int:
     """Draw a list of pre-wrapped lines. Returns new y."""
     if not lines:
@@ -202,8 +204,13 @@ def render_card(
     page_no: int = 0,
     total_pages: int = 0,
     output_path: Path = None,
+    darkmode: bool = False,
 ) -> None:
-    img = Image.new("1", (WIDTH, HEIGHT), BG)
+    # Local colors (avoids mutating module globals).
+    bg = BG_DARK if darkmode else BG_LIGHT
+    fg = FG_DARK if darkmode else FG_LIGHT
+
+    img = Image.new("1", (WIDTH, HEIGHT), bg)
     draw = ImageDraw.Draw(img)
 
     # Fonts
@@ -217,7 +224,7 @@ def render_card(
 
     # ----------- Outer card border (rounded rectangle) -----------
     card_rect = [OUTER_MARGIN, OUTER_MARGIN, WIDTH - OUTER_MARGIN - 1, HEIGHT - OUTER_MARGIN - 1]
-    draw.rounded_rectangle(card_rect, radius=14, outline=FG, width=2)
+    draw.rounded_rectangle(card_rect, radius=14, outline=fg, width=2)
 
     inner_x_left = card_rect[0] + CARD_PADDING
     inner_x_right = card_rect[2] - CARD_PADDING
@@ -225,14 +232,14 @@ def render_card(
 
     # ----------- Word at top (serif, centered) -----------
     y = OUTER_MARGIN + CARD_PADDING + 14
-    y = draw_centered_text(draw, word, word_font, y, width=WIDTH)
+    y = draw_centered_text(draw, word, word_font, y, width=WIDTH, fill=fg)
     # Underline (thin, decorative, classical dictionary style)
     underline_y = y + 16
     line_w_min, _ = measure(word, word_font)
     line_w = max(line_w_min + 40, 80)
     cx = WIDTH // 2
     draw.line([(cx - line_w // 2, underline_y), (cx + line_w // 2, underline_y)],
-              fill=FG, width=1)
+              fill=fg, width=1)
     y = underline_y + 22
 
     # ----------- Pronunciation (italic small, centered) -----------
@@ -258,7 +265,7 @@ def render_card(
                     ipa_font = candidate
                     break
         draw.text(((WIDTH - measure(ipa_text, ipa_font)[0]) // 2, y), ipa_text,
-                  font=ipa_font, fill=FG)
+                  font=ipa_font, fill=fg)
         y += measure(ipa_text, ipa_font)[1] + 8
 
     # ----------- Pronunciation label / helper -----------
@@ -267,47 +274,47 @@ def render_card(
         tag = "pronunciation"
         tag_font = small_font
         tag_w, tag_h = measure(tag, tag_font)
-        draw.text(((WIDTH - tag_w) // 2, y), tag, font=tag_font, fill=FG)
+        draw.text(((WIDTH - tag_w) // 2, y), tag, font=tag_font, fill=fg)
         y += tag_h + 20
 
     # ----------- Definition -----------
-    y = draw_section_title(draw, "Definition", title_font, y, inner_x_left, inner_x_right)
+    y = draw_section_title(draw, "Definition", title_font, y, inner_x_left, inner_x_right, fill=fg)
     def_lines = truncate_lines(definition, body_font, content_w, max_lines=4)
     y = draw_body_lines(draw, def_lines, body_font, inner_x_left, y, content_w,
-                        line_spacing=8)
+                        line_spacing=8, fill=fg)
     y += 28  # gap before next section
 
     # ----------- Usage / Example -----------
-    y = draw_section_title(draw, "Usage", title_font, y, inner_x_left, inner_x_right)
+    y = draw_section_title(draw, "Usage", title_font, y, inner_x_left, inner_x_right, fill=fg)
     ex_lines = truncate_lines(example, body_font, content_w, max_lines=4)
     y = draw_body_lines(draw, ex_lines, body_font, inner_x_left, y, content_w,
-                        line_spacing=8)
+                        line_spacing=8, fill=fg)
     y += 28
 
     # ----------- Synonyms (italic, dictionary style) -----------
-    y = draw_section_title(draw, "Synonyms", title_font, y, inner_x_left, inner_x_right)
+    y = draw_section_title(draw, "Synonyms", title_font, y, inner_x_left, inner_x_right, fill=fg)
     syn_lines = truncate_lines(synonyms, body_italic_font, content_w, max_lines=4)
     y = draw_body_lines(draw, syn_lines, body_italic_font, inner_x_left, y, content_w,
-                        line_spacing=8)
+                        line_spacing=8, fill=fg)
 
     # ----------- Footer: source on left, page number on right -----------
     footer_y = HEIGHT - OUTER_MARGIN - CARD_PADDING - 8
     # Tiny separator line above
     sep_y = footer_y - 22
-    draw.line([(inner_x_left, sep_y), (inner_x_right, sep_y)], fill=FG, width=1)
+    draw.line([(inner_x_left, sep_y), (inner_x_right, sep_y)], fill=fg, width=1)
 
     if book_name:
         # truncate book name if needed
         max_chars = 38
         if len(book_name) > max_chars:
             book_name = book_name[: max_chars - 1] + "…"
-        draw.text((inner_x_left, footer_y), book_name, font=small_font, fill=FG)
+        draw.text((inner_x_left, footer_y), book_name, font=small_font, fill=fg)
 
     if total_pages > 0:
         counter_text = f"{page_no} / {total_pages}"
         cw, _ = measure(counter_text, number_font)
         draw.text((inner_x_right - cw, footer_y - 2), counter_text,
-                  font=number_font, fill=FG)
+                  font=number_font, fill=fg)
 
     img.save(output_path, format="BMP")
 
@@ -325,10 +332,14 @@ def main() -> int:
     ap.add_argument("--output-dir", default="bmp")
     ap.add_argument("--max-items", type=int, default=0,
                     help="If > 0, limit to this many rows (0 = all)")
+    ap.add_argument("--darkmode", action="store_true",
+                    help="Invert colors: black background, white text.")
     args = ap.parse_args()
 
     csv_path = Path(args.csv).expanduser().resolve()
     out_dir = Path(args.output_dir).expanduser().resolve()
+    if args.darkmode:
+        out_dir = out_dir.parent / f"{out_dir.name}_dark"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not csv_path.exists():
@@ -365,6 +376,7 @@ def main() -> int:
                 book_name=book,
                 page_no=i + 1, total_pages=total,
                 output_path=out_path,
+                darkmode=args.darkmode,
             )
         except Exception as e:
             print(f"    failed on '{word}': {e}", file=sys.stderr)
