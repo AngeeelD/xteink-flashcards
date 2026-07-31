@@ -1,0 +1,19 @@
+services:
+  webapp:
+    build: .
+    container_name: flashcards-webapp
+    ports:
+      - "5000:5000"
+    environment:
+      # Ollama runs on the Mac mini, not inside Docker. host.docker.internal
+      # resolves to the host gateway on Docker Desktop / OrbStack on macOS.
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_MODEL=llama3.1
+    volumes:
+      # Persist generated jobs + uploads across container restarts.
+      - ./webapp/jobs:/app/webapp/jobs
+      - ./webapp/uploads:/app/webapp/uploads
+    restart: unless-stopped
+    # host.docker.internal works out-of-the-box; keep network bridge default.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -1,0 +1,45 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+
+# Runtime artifacts (regenerated each session)
+webapp/uploads/
+webapp/jobs/
+webapp/static/bmp/
+
+# Generated flashcards for the e-reader (regenerated per session)
+bmp/
+chapter_*.csv
+contacto_*.csv
+gentleman_*.csv
+test_*.csv
+*_all.csv
+*.bmp
+*.zip
+
+# Workflow caches (skill registry, etc.)
+.atl/
+
+# Books we read (large, model-specific)
+*.epub
+
+# Tutorial PDF (kept locally only)
+tutorial.pdf
+
+# Fabric.js canvas export (unrelated)
+xtc-card-template.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Docker
+.dockerignore

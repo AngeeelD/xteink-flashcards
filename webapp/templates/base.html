@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Xteink Flashcards{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/picocss@2/css/pico.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="container">
+    <header>
+      <hgroup>
+        <h1>{% block heading %}Xteink Flashcards{% endblock %}</h1>
+        <p>{% block subheading %}Convert an epub into per-chapter bilingual flashcards + e-ink screen saver BMPs.{% endblock %}</p>
+      </hgroup>
+    </header>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

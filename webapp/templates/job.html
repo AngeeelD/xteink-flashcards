@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block heading %}Job {{ meta.id }}{% endblock %}
+{% block subheading %}{{ meta.original_filename or 'epub' }}{% endblock %}
+
+{% block content %}
+<article id="status-card" aria-busy="true">
+  <header>
+    <strong id="status">{{ meta.status }}</strong>
+    <span class="phase" id="phase-label">{{ meta.phase_label or '' }}</span>
+  </header>
+
+  <div id="progress-area">
+    <progress id="progress-bar" value="0" max="100"></progress>
+    <small id="progress-text">waiting…</small>
+  </div>
+
+  {% if meta.error %}
+  <p style="color: var(--pico-color-red-500);"><strong>Error:</strong> {{ meta.error }}</p>
+  {% endif %}
+
+  <div id="downloads" hidden>
+    <h3>Downloads</h3>
+    <div id="downloads-list"></div>
+  </div>
+
+  <p><a href="/">← Back to upload form</a></p>
+</article>
+
+<script>
+  const jobId = {{ job_id|tojson }};
+  const statusEl = document.getElementById('status');
+  const phaseEl = document.getElementById('phase-label');
+  const progressBar = document.getElementById('progress-bar');
+  const progressText = document.getElementById('progress-text');
+  const downloadsEl = document.getElementById('downloads');
+  const downloadsListEl = document.getElementById('downloads-list');
+  const cardEl = document.getElementById('status-card');
+
+  function setProgress(done, total) {
+    if (total && total > 0) {
+      const pct = Math.round((done / total) * 100);
+      progressBar.value = pct;
+      progressText.textContent = `${done} / ${total} chapters`;
+    } else {
+      progressBar.removeAttribute('value');
+      progressText.textContent = '…';
+    }
+  }
+
+  async function poll() {
+    try {
+      const r = await fetch(`/job/${jobId}/status.json`, { cache: 'no-store' });
+      const m = await r.json();
+      statusEl.textContent = m.status;
+      phaseEl.textContent = m.phase_label || '';
+      if (m.chapters_total) {
+        setProgress(m.chapters_done || 0, m.chapters_total);
+      } else if (m.status === 'done') {
+        progressBar.value = 100;
+        progressText.textContent = 'complete';
+      }
+
+      if (m.status === 'done') {
+        cardEl.removeAttribute('aria-busy');
+        downloadsEl.hidden = false;
+        downloadsListEl.innerHTML = '';
+        if (m.flashcards_zip) {
+          const a = document.createElement('a');
+          a.href = `/download/${jobId}/flashcards`;
+          a.role = 'button';
+          a.textContent = `flashcards.zip (${m.flashcards_count || 0} files)`;
+          downloadsListEl.appendChild(a);
+        }
+        if (m.screensaver_zip) {
+          const a = document.createElement('a');
+          a.href = `/download/${jobId}/screensaver`;
+          a.role = 'button';
+          a.textContent = `screensaver.zip (${m.bmp_count || 0} BMPs)`;
+          downloadsListEl.appendChild(a);
+        }
+        return;
+      }
+
+      if (m.status === 'error') {
+        cardEl.removeAttribute('aria-busy');
+        return;
+      }
+
+      setTimeout(poll, 2500);
+    } catch (e) {
+      setTimeout(poll, 5000);
+    }
+  }
+
+  poll();
+</script>
+
+{% endblock %}

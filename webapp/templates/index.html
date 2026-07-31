@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+
+<form action="/upload" method="post" enctype="multipart/form-data">
+
+  <label for="epub">Epub file</label>
+  <input type="file" id="epub" name="epub" accept=".epub" required>
+
+  <div class="grid">
+    <div>
+      <label for="source">Source language</label>
+      <select id="source" name="source">
+        <option value="en" selected>English</option>
+        <option value="es">Spanish</option>
+      </select>
+    </div>
+    <div>
+      <label for="target">Target language</label>
+      <select id="target" name="target">
+        <option value="es" selected>Spanish</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div>
+      <label for="items">Items per chapter</label>
+      <input type="number" id="items" name="items" value="30" min="5" max="100">
+    </div>
+  </div>
+
+  <fieldset>
+    <legend>Chapter range (optional)</legend>
+    <div class="grid">
+      <div>
+        <label for="start">Start chapter</label>
+        <input type="number" id="start" name="start" placeholder="1" min="1">
+      </div>
+      <div>
+        <label for="end">End chapter</label>
+        <input type="number" id="end" name="end" placeholder="last" min="1">
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Outputs</legend>
+    <label>
+      <input type="checkbox" id="generate_csv" name="generate_csv" checked>
+      <strong>flashcards.zip</strong> — per-chapter bilingual CSVs (English|Spanish)
+    </label>
+    <label>
+      <input type="checkbox" id="generate_bmp" name="generate_bmp" checked>
+      <strong>screensaver.zip</strong> — BMPs (528×792) for e-ink lock screen
+    </label>
+    <label>
+      <input type="checkbox" id="with_examples" name="with_examples">
+      Include usage examples in BMPs (slower; per-chapter LLM call)
+    </label>
+  </fieldset>
+
+  <button type="submit" id="submit-btn">Start processing</button>
+</form>
+
+{% if active_job %}
+<article aria-label="Active job">
+  <header><strong>Active job</strong> — <code>{{ active_job.id }}</code></header>
+  <p>Status: <strong>{{ active_job.status }}</strong> ({{ active_job.phase_label }})</p>
+  {% if active_job.status == 'done' %}
+    {% if active_job.flashcards_zip %}
+      <a href="/download/{{ active_job.id }}/flashcards" role="button">Download flashcards.zip</a>
+    {% endif %}
+    {% if active_job.screensaver_zip %}
+      <a href="/download/{{ active_job.id }}/screensaver" role="button">Download screensaver.zip</a>
+    {% endif %}
+  {% endif %}
+</article>
+{% endif %}
+
+<script>
+  const btn = document.getElementById('submit-btn');
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+  });
+</script>
+
+{% endblock %}

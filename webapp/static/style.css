@@ -1,0 +1,34 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+#status-card header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+#status-card .phase {
+  color: var(--pico-muted-color);
+  font-size: 0.9em;
+}
+
+#progress-area {
+  margin: 1rem 0;
+}
+
+#progress-text {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--pico-muted-color);
+}
+
+#downloads-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+progress {
+  width: 100%;
+}
