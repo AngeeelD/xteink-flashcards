@@ -27,8 +27,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 # ----------------------------- Config -----------------------------
 
-WIDTH = 528
-HEIGHT = 792
+# Device presets. Override via --width/--height in the CLI.
+WIDTH_DEFAULT = 528   # Xteink X3
+HEIGHT_DEFAULT = 792  # Xteink X3
+WIDTH_X4 = 480        # Xteink X4
+HEIGHT_X4 = 800       # Xteink X4
+
 BG_LIGHT = 255   # white background (light mode)
 BG_DARK = 0      # black background (dark mode)
 FG_LIGHT = 0     # black text (light mode)
@@ -146,7 +150,7 @@ def truncate_lines(text: str, font: ImageFont.FreeTypeFont,
     return lines
 
 
-def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH,
+def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH_DEFAULT,
                        fill: int = 0, shadow: bool = False, dy: int = 1) -> int:
     text = text.strip()
     if not text:
@@ -155,8 +159,8 @@ def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH,
     x = (width - w) // 2
     if shadow:
         # subtle 1-pixel shadow (in 1-bit, this just outlines slightly)
-        draw.text((x + dy, y + dy), text, font=font, fill=FG)
-    draw.text((x, y), text, font=font, fill=FG)
+        draw.text((x + dy, y + dy), text, font=font, fill=fill)
+    draw.text((x, y), text, font=font, fill=fill)
     return y + h
 
 
@@ -205,26 +209,35 @@ def render_card(
     total_pages: int = 0,
     output_path: Path = None,
     darkmode: bool = False,
+    width: int = WIDTH_DEFAULT,
+    height: int = HEIGHT_DEFAULT,
 ) -> None:
     # Local colors (avoids mutating module globals).
     bg = BG_DARK if darkmode else BG_LIGHT
     fg = FG_DARK if darkmode else FG_LIGHT
 
-    img = Image.new("1", (WIDTH, HEIGHT), bg)
+    # Compute a font-size scale relative to the X3 baseline (528×792).
+    # We scale by width primarily, since text wrapping depends on horizontal space;
+    # but we cap with height so fonts don't overshoot a small canvas.
+    scale = min(width / WIDTH_DEFAULT, height / HEIGHT_DEFAULT)
+    def s(base):
+        return max(8, int(round(base * scale)))
+
+    img = Image.new("1", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
-    # Fonts
-    word_font = find_font("serif", 56, bold=False)         # slightly smaller word
-    ipa_font = find_font("serif", 22, italic=True)         # italic small for IPA
-    title_font = find_font("sans", 20, bold=True)
-    body_font = find_font("sans", 26)
-    body_italic_font = find_font("sans", 26, italic=True)
-    small_font = find_font("sans", 14)
-    number_font = find_font("serif", 22, italic=True)
+    # Fonts (scaled to canvas size)
+    word_font = find_font("serif", s(56), bold=False)
+    ipa_font = find_font("serif", s(22), italic=True)
+    title_font = find_font("sans", s(20), bold=True)
+    body_font = find_font("sans", s(26))
+    body_italic_font = find_font("sans", s(26), italic=True)
+    small_font = find_font("sans", s(14))
+    number_font = find_font("serif", s(22), italic=True)
 
     # ----------- Outer card border (rounded rectangle) -----------
-    card_rect = [OUTER_MARGIN, OUTER_MARGIN, WIDTH - OUTER_MARGIN - 1, HEIGHT - OUTER_MARGIN - 1]
-    draw.rounded_rectangle(card_rect, radius=14, outline=fg, width=2)
+    card_rect = [OUTER_MARGIN, OUTER_MARGIN, width - OUTER_MARGIN - 1, height - OUTER_MARGIN - 1]
+    draw.rounded_rectangle(card_rect, radius=max(8, s(14)), outline=fg, width=2)
 
     inner_x_left = card_rect[0] + CARD_PADDING
     inner_x_right = card_rect[2] - CARD_PADDING
@@ -232,12 +245,12 @@ def render_card(
 
     # ----------- Word at top (serif, centered) -----------
     y = OUTER_MARGIN + CARD_PADDING + 14
-    y = draw_centered_text(draw, word, word_font, y, width=WIDTH, fill=fg)
+    y = draw_centered_text(draw, word, word_font, y, width=width, fill=fg)
     # Underline (thin, decorative, classical dictionary style)
     underline_y = y + 16
     line_w_min, _ = measure(word, word_font)
     line_w = max(line_w_min + 40, 80)
-    cx = WIDTH // 2
+    cx = width // 2
     draw.line([(cx - line_w // 2, underline_y), (cx + line_w // 2, underline_y)],
               fill=fg, width=1)
     y = underline_y + 22
@@ -259,12 +272,12 @@ def render_card(
         ipa_w, ipa_h = measure(ipa_text, ipa_font)
         if ipa_w > content_w:
             # shrink font
-            for size in [24, 22, 20]:
+            for size in [s(24), s(22), s(20)]:
                 candidate = find_font("serif", size, italic=True)
                 if measure(ipa_text, candidate)[0] <= content_w:
                     ipa_font = candidate
                     break
-        draw.text(((WIDTH - measure(ipa_text, ipa_font)[0]) // 2, y), ipa_text,
+        draw.text(((width - measure(ipa_text, ipa_font)[0]) // 2, y), ipa_text,
                   font=ipa_font, fill=fg)
         y += measure(ipa_text, ipa_font)[1] + 8
 
@@ -274,7 +287,7 @@ def render_card(
         tag = "pronunciation"
         tag_font = small_font
         tag_w, tag_h = measure(tag, tag_font)
-        draw.text(((WIDTH - tag_w) // 2, y), tag, font=tag_font, fill=fg)
+        draw.text(((width - tag_w) // 2, y), tag, font=tag_font, fill=fg)
         y += tag_h + 20
 
     # ----------- Definition -----------
@@ -282,14 +295,14 @@ def render_card(
     def_lines = truncate_lines(definition, body_font, content_w, max_lines=4)
     y = draw_body_lines(draw, def_lines, body_font, inner_x_left, y, content_w,
                         line_spacing=8, fill=fg)
-    y += 28  # gap before next section
+    y += s(28)  # gap before next section
 
     # ----------- Usage / Example -----------
     y = draw_section_title(draw, "Usage", title_font, y, inner_x_left, inner_x_right, fill=fg)
     ex_lines = truncate_lines(example, body_font, content_w, max_lines=4)
     y = draw_body_lines(draw, ex_lines, body_font, inner_x_left, y, content_w,
                         line_spacing=8, fill=fg)
-    y += 28
+    y += s(28)
 
     # ----------- Synonyms (italic, dictionary style) -----------
     y = draw_section_title(draw, "Synonyms", title_font, y, inner_x_left, inner_x_right, fill=fg)
@@ -298,7 +311,7 @@ def render_card(
                         line_spacing=8, fill=fg)
 
     # ----------- Footer: source on left, page number on right -----------
-    footer_y = HEIGHT - OUTER_MARGIN - CARD_PADDING - 8
+    footer_y = height - OUTER_MARGIN - CARD_PADDING - 8
     # Tiny separator line above
     sep_y = footer_y - 22
     draw.line([(inner_x_left, sep_y), (inner_x_right, sep_y)], fill=fg, width=1)
@@ -327,14 +340,30 @@ def slug(s: str, max_len: int = 60) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Generate stylized 528x792 BMP flashcards.")
+    ap = argparse.ArgumentParser(
+        description="Generate stylized e-ink BMP flashcards (Xteink X3 or X4).",
+    )
     ap.add_argument("--csv", required=True)
     ap.add_argument("--output-dir", default="bmp")
     ap.add_argument("--max-items", type=int, default=0,
                     help="If > 0, limit to this many rows (0 = all)")
     ap.add_argument("--darkmode", action="store_true",
                     help="Invert colors: black background, white text.")
+    ap.add_argument("--device", choices=["x3", "x4"], default="x3",
+                    help="E-reader model (drives output resolution).")
+    ap.add_argument("--width", type=int, default=None,
+                    help="Override output width (overrides --device).")
+    ap.add_argument("--height", type=int, default=None,
+                    help="Override output height (overrides --device).")
     args = ap.parse_args()
+
+    # Resolve resolution from --device or explicit --width/--height
+    if args.width and args.height:
+        width, height = args.width, args.height
+    elif args.device == "x4":
+        width, height = WIDTH_X4, HEIGHT_X4
+    else:
+        width, height = WIDTH_DEFAULT, HEIGHT_DEFAULT
 
     csv_path = Path(args.csv).expanduser().resolve()
     out_dir = Path(args.output_dir).expanduser().resolve()
@@ -377,6 +406,8 @@ def main() -> int:
                 page_no=i + 1, total_pages=total,
                 output_path=out_path,
                 darkmode=args.darkmode,
+                width=width,
+                height=height,
             )
         except Exception as e:
             print(f"    failed on '{word}': {e}", file=sys.stderr)

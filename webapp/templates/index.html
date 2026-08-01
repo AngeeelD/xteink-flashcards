@@ -43,17 +43,26 @@
 
   <fieldset>
     <legend>Outputs</legend>
+
+    <div>
+      <label for="device">E-reader device</label>
+      <select id="device" name="device">
+        <option value="x3" selected>Xteink X3 (528 × 792)</option>
+        <option value="x4">Xteink X4 (480 × 800)</option>
+      </select>
+    </div>
+
     <label>
       <input type="checkbox" id="generate_csv" name="generate_csv" checked>
       <strong>flashcards.zip</strong> — per-chapter bilingual CSVs (English|Spanish)
     </label>
     <label>
       <input type="checkbox" id="generate_bmp" name="generate_bmp" checked>
-      <strong>screensaver.zip</strong> — BMPs (528×792) for e-ink lock screen
+      <strong>screensaver.zip</strong> — BMPs for the chosen device's lock screen
     </label>
     <label>
       <input type="checkbox" id="darkmode" name="darkmode">
-      Dark mode BMPs (black background, white text) — adds a second archive
+      Dark-mode BMPs (black background, white text) — adds a second archive
     </label>
     <label>
       <input type="checkbox" id="with_examples" name="with_examples">

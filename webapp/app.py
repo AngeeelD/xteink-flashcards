@@ -53,7 +53,11 @@ from enrich_flashcards import (  # noqa: E402
     filter_words_by_source_text,
     ollama_generate as ef_ollama_generate,
 )
-from generate_flashcard_bmps import render_card  # noqa: E402
+from generate_flashcard_bmps import (  # noqa: E402
+    render_card,
+    WIDTH_DEFAULT, HEIGHT_DEFAULT,
+    WIDTH_X4, HEIGHT_X4,
+)
 
 # ----------------------------------------------------------------------------
 
@@ -175,6 +179,8 @@ def _generate_bmps_per_chapter(
     sd: StarDict,
     update_status,
     darkmode: bool = False,
+    width: int = WIDTH_DEFAULT,
+    height: int = HEIGHT_DEFAULT,
 ) -> tuple[int, int]:
     """Per-chapter enrichment + BMP rendering. If darkmode=True, BMPs are
     rendered inverted (black bg, white fg)."""
@@ -279,6 +285,8 @@ def _generate_bmps_per_chapter(
                     total_pages=len(enriched),
                     output_path=bmp_path,
                     darkmode=darkmode,
+                    width=width,
+                    height=height,
                 )
             except Exception as e:
                 print(f"[job] bmp render failed for {row['word']}: {e}")
@@ -368,6 +376,13 @@ def _run_job(job_id: str, config: dict) -> None:
             sd = StarDict(dict_dir)
             update(stardict_words=sd.wordcount)
 
+            # Resolve output resolution for the chosen device
+            device = config.get("device", "x3")
+            if device == "x4":
+                bmp_w, bmp_h = WIDTH_X4, HEIGHT_X4
+            else:
+                bmp_w, bmp_h = WIDTH_DEFAULT, HEIGHT_DEFAULT
+
             # Pass B1: light-mode BMPs (always)
             bmp_written, _ = _generate_bmps_per_chapter(
                 epub_path, chapters,
@@ -379,11 +394,14 @@ def _run_job(job_id: str, config: dict) -> None:
                 sd=sd,
                 update_status=update,
                 darkmode=False,
+                width=bmp_w,
+                height=bmp_h,
             )
             update(phase="zipping", phase_label=f"Zipping {bmp_written} light BMPs…")
             zip_path = job_dir / "screensaver.zip"
             n = _zip_dir(bmp_dir, zip_path)
-            update(screensaver_zip=f"jobs/{job_id}/screensaver.zip", bmp_count=n)
+            update(screensaver_zip=f"jobs/{job_id}/screensaver.zip", bmp_count=n,
+                   device=device, bmp_resolution=f"{bmp_w}x{bmp_h}")
 
             # Pass B2: dark-mode BMPs (only if requested).
             if config.get("darkmode"):
@@ -398,6 +416,8 @@ def _run_job(job_id: str, config: dict) -> None:
                     sd=sd,
                     update_status=update,
                     darkmode=True,
+                    width=bmp_w,
+                    height=bmp_h,
                 )
                 update(phase="zipping", phase_label=f"Zipping {bmp_dark_written} dark BMPs…")
                 dark_zip_path = job_dir / "screensaver_dark.zip"
@@ -469,6 +489,7 @@ def upload():
             "items": int(request.form.get("items", "30")),
             "start": request.form.get("start") or None,
             "end": request.form.get("end") or None,
+            "device": request.form.get("device", "x3"),
             "generate_csv": request.form.get("generate_csv") == "on",
             "generate_bmp": request.form.get("generate_bmp") == "on",
             "darkmode": request.form.get("darkmode") == "on",

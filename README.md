@@ -1,8 +1,17 @@
 # Xteink Flashcards
 
-**Turn any epub into per-chapter flashcards and 528×792 e-ink screensaver BMPs for a [Xteink X3](https://www.xteink.com/) reader.**
+**Turn any epub into per-chapter flashcards and e-ink screensaver BMPs for [Xteink X3](https://www.xteink.com/) *and* X4 readers.**
 
 A self-hosted pipeline (Flask + [Ollama](https://ollama.com) + [StarDict](https://en.wikipedia.org/wiki/StarDict)) that runs entirely on your own machine — no cloud, no API keys, no data leaves your network.
+
+## Supported devices
+
+| Model | Resolution | Aspect |
+|---|---|---|
+| **Xteink X3** | 528 × 792 | 2:3 |
+| **Xteink X4** | 480 × 800 | 3:5 |
+
+Pick your model in the upload form. The renderer scales fonts and spacing proportionally so the dictionary-entry layout fits either screen. (You can also pass `--width` / `--height` to the CLI to override.)
 
 ## What it produces
 
@@ -11,7 +20,7 @@ Upload an epub. Pick your languages. Get back **one or both** of:
 | Output | Format | What it is |
 |---|---|---|
 | `flashcards.zip` | per-chapter CSV (`English,Spanish`) | Bilingual flashcards ready to drop on the Xteink's `/flashcards/` folder. |
-| `screensaver.zip` | per-chapter BMP (528×792, 1-bit) | Lock-screen images with IPA pronunciation, definition, usage, synonyms — dictionary-entry style. Optionally a second `screensaver_dark.zip` for OLED devices. |
+| `screensaver.zip` | per-chapter BMP (device resolution, 1-bit) | Lock-screen images with IPA pronunciation, definition, usage, synonyms — dictionary-entry style. Optionally a second `screensaver_dark.zip` for OLED or night-mode devices. |
 
 Each archive is regenerated from scratch on every run, so you can iterate freely while reading.
 
