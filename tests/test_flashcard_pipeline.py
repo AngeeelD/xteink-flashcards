@@ -194,6 +194,9 @@ class BmpRenderingTests(unittest.TestCase):
         )
 
     def test_render_card_accepts_font_path(self):
+        """When font_path is set, the override applies to every role EXCEPT
+        the IPA section, which always uses the curated italic for phonetic
+        glyph coverage."""
         with tempfile.TemporaryDirectory() as tmpdir:
             fonts_dir = Path(tmpdir)
             ttf_path = fonts_dir / "Custom.ttf"
@@ -214,8 +217,57 @@ class BmpRenderingTests(unittest.TestCase):
                     font_path=str(ttf_path),
                 )
 
-        called_paths = [call.args[0] for call in truetype.call_args_list]
-        self.assertTrue(all(str(ttf_path) == str(p) for p in called_paths))
+        called_paths = [str(p) for p in (call.args[0] for call in truetype.call_args_list)]
+        # Six non-IPA roles use the override path.
+        override_calls = [p for p in called_paths if p == str(ttf_path)]
+        self.assertEqual(
+            len(override_calls), 6,
+            f"expected 6 ImageFont.truetype calls to use the override "
+            f"(word + title + body + body_italic + small + number), "
+            f"got {len(override_calls)}",
+        )
+        # The IPA role falls back to a curated italic (different path).
+        curated_calls = [p for p in called_paths if p != str(ttf_path)]
+        self.assertGreaterEqual(
+            len(curated_calls), 1,
+            "expected the IPA role to fall back to the curated italic",
+        )
+
+    def test_render_card_ipa_keeps_curated_italic_when_font_overridden(self):
+        """Even with a font_path override, the IPA section resolves through
+        find_font so phonetic glyphs always render correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ttf_path = Path(tmpdir) / "Custom.ttf"
+            ttf_path.write_bytes(b"\x00\x01\x00\x00")
+            output = Path(tmpdir) / "card.bmp"
+
+            curated_font = bmp.ImageFont.load_default()
+            with patch.object(bmp, "find_font", return_value=curated_font) as find:
+                bmp.render_card(
+                    word="refactoring",
+                    pronunciation="/ˈziː.tɪŋk/",  # triggers IPA section
+                    definition="noun. process in which code is refactored",
+                    example="",
+                    synonyms="",
+                    book_name="Book",
+                    output_path=output,
+                    font_path=str(ttf_path),
+                )
+
+        # find_font was called for IPA (and other roles). Critically,
+        # ImageFont.truetype was never called with the override path for
+        # the IPA role — the override path only appears for non-IPA roles.
+        # find_font with italic=True was used for IPA.
+        italic_calls = [
+            call for call in find.call_args_list
+            if call.kwargs.get("italic") is True
+            or (len(call.args) >= 2 and call.args[1] is True)
+        ]
+        self.assertTrue(
+            italic_calls,
+            "expected at least one find_font call with italic=True "
+            "(the IPA resolution path)",
+        )
 
     def test_section_heading_does_not_draw_a_divider(self):
         class DrawRecorder:

@@ -383,13 +383,19 @@ def render_card(
     img = Image.new("1", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
-    # Fonts (scaled to canvas size). If the caller pinned a specific font
-    # path, all roles use it (no separate bold/italic faces). Otherwise we
-    # fall back to the curated candidates.
+    # Fonts (scaled to canvas size). When the caller pins a specific font
+    # path, it overrides every role EXCEPT the IPA section. The IPA section
+    # always resolves through find_font("serif", italic=True) because
+    # phonetic glyphs (/ʃ/, /θ/, /ŋ/, etc.) require a font with full IPA
+    # coverage — Times New Roman Italic on macOS, DejaVu Serif Italic on
+    # Linux. The user's pick is often a TrueType collection
+    # (Palatino.ttc, Times.ttc) whose first face is the Roman cut and
+    # lacks those glyphs; using the TTC verbatim breaks the pronunciation
+    # line. Keeping the IPA on the curated italic makes the card readable
+    # regardless of what the user picks.
     if font_path and Path(font_path).exists():
         try:
             word_font = ImageFont.truetype(font_path, s(56))
-            ipa_font = ImageFont.truetype(font_path, s(22))
             title_font = ImageFont.truetype(font_path, s(20))
             body_font = ImageFont.truetype(font_path, s(26))
             body_italic_font = ImageFont.truetype(font_path, s(26))
@@ -397,7 +403,6 @@ def render_card(
             number_font = ImageFont.truetype(font_path, s(22))
         except Exception:
             word_font = find_font("serif", s(56), bold=False)
-            ipa_font = find_font("serif", s(22), italic=True)
             title_font = find_font("sans", s(20), bold=True)
             body_font = find_font("sans", s(26))
             body_italic_font = find_font("sans", s(26), italic=True)
@@ -405,12 +410,15 @@ def render_card(
             number_font = find_font("serif", s(22), italic=True)
     else:
         word_font = find_font("serif", s(56), bold=False)
-        ipa_font = find_font("serif", s(22), italic=True)
         title_font = find_font("sans", s(20), bold=True)
         body_font = find_font("sans", s(26))
         body_italic_font = find_font("sans", s(26), italic=True)
         small_font = find_font("sans", s(14))
         number_font = find_font("serif", s(22), italic=True)
+
+    # IPA always resolves through the curated italic regardless of the
+    # user's font pick — see the comment block above.
+    ipa_font = find_font("serif", s(22), italic=True)
 
     # ----------- Outer card border (rounded rectangle) -----------
     card_rect = [OUTER_MARGIN, OUTER_MARGIN, width - OUTER_MARGIN - 1, height - OUTER_MARGIN - 1]
@@ -440,10 +448,7 @@ def render_card(
         )
         if measure(ipa_text, ipa_font)[0] > content_w:
             for size in [s(24), s(22), s(20)]:
-                if font_path and Path(font_path).exists():
-                    candidate = ImageFont.truetype(font_path, size)
-                else:
-                    candidate = find_font("serif", size, italic=True)
+                candidate = find_font("serif", size, italic=True)
                 if measure(ipa_text, candidate)[0] <= content_w:
                     ipa_font = candidate
                     break
