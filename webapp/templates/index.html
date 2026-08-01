@@ -112,10 +112,17 @@
         Dark mode (exclusive: delivers only screensaver_dark.zip)
       </label>
     </div>
-    <figure class="preview" id="preview-figure">
-      <img id="preview-img" src="" alt="Live preview of the selected screensaver card" />
-      <figcaption>Live preview · updates as you change settings</figcaption>
-    </figure>
+    <div class="device-frame" id="device-frame" data-device="x4">
+      <div class="device-label" id="device-label">Xteink X4</div>
+      <div class="device-screen" id="preview-screen">
+        <img id="preview-img" src="" alt="Live preview of the selected screensaver card" />
+      </div>
+      <div class="device-buttons" aria-hidden="true">
+        <span class="device-btn device-btn-round"></span>
+        <span class="device-btn device-btn-pill"></span>
+      </div>
+    </div>
+    <p class="preview-caption">Live preview · updates as you change settings</p>
   </fieldset>
 
   <button type="submit" id="submit-btn">Generate flashcards</button>
@@ -153,7 +160,9 @@
   // render_card pipeline as real jobs so what the user sees matches what
   // they'll get.
   const previewImg = document.getElementById('preview-img');
-  const previewFigure = document.getElementById('preview-figure');
+  const previewScreen = document.getElementById('preview-screen');
+  const deviceFrame = document.getElementById('device-frame');
+  const deviceLabel = document.getElementById('device-label');
   const bmpEnabled = document.getElementById('bmp_enabled');
   const bmpDark = document.getElementById('bmp_dark');
   const bmpWithExamples = document.getElementById('bmp_with_examples');
@@ -171,10 +180,18 @@
     };
   }
 
+  function syncDeviceFrame() {
+    // The X3 and X4 share the same physical layout but different screen
+    // aspect ratios — switch the data attribute so CSS picks the right one.
+    const device = bmpDevice.value;
+    deviceFrame.dataset.device = device;
+    deviceLabel.textContent = device === 'x4' ? 'Xteink X4' : 'Xteink X3';
+  }
+
   function syncPreviewChrome() {
-    // The container background follows the variant so the preview never
-    // looks like a black frame around a light card (or vice versa).
-    previewFigure.classList.toggle('preview-dark', bmpDark.checked);
+    // The screen background follows the variant so the device never shows
+    // a light card floating in an inverted frame (or vice versa).
+    previewScreen.classList.toggle('preview-dark', bmpDark.checked);
   }
 
   // ---- Conditional fieldsets --------------------------------------------
@@ -236,7 +253,9 @@
       .addEventListener(evt, debouncedRefresh);
   });
   bmpEnabled.addEventListener('change', refreshPreview);
+  bmpDevice.addEventListener('change', syncDeviceFrame);
 
+  syncDeviceFrame();
   setTimeout(refreshPreview, 100);
 
   // ---- Submit-button protection -----------------------------------------
