@@ -118,8 +118,8 @@
         <img id="preview-img" src="" alt="Live preview of the selected screensaver card" />
       </div>
       <div class="device-buttons" aria-hidden="true">
-        <span class="device-btn device-btn-round"></span>
-        <span class="device-btn device-btn-pill"></span>
+        <span class="device-btn device-btn-pill-left"></span>
+        <span class="device-btn device-btn-pill-right"></span>
       </div>
     </div>
     <p class="preview-caption">Live preview · updates as you change settings</p>
@@ -196,7 +196,10 @@
 
   // ---- Conditional fieldsets --------------------------------------------
   // Each output section has a `data-conditional="<checkbox-id>"` attribute
-  // and is hidden when its parent checkbox is unchecked.
+  // and is hidden when its parent checkbox is unchecked. We wire the
+  // listener by looking up the controlling checkbox via that id so the
+  // template only needs the attribute on the fieldset — no parallel
+  // marker on each checkbox required.
   function syncConditionalSections() {
     document.querySelectorAll('fieldset[data-conditional]').forEach((fs) => {
       const toggleId = fs.dataset.conditional;
@@ -205,8 +208,12 @@
       fs.hidden = !checkbox.checked;
     });
   }
-  document.querySelectorAll('input[type=checkbox][data-controls]').forEach((cb) => {
-    cb.addEventListener('change', syncConditionalSections);
+  document.querySelectorAll('fieldset[data-conditional]').forEach((fs) => {
+    const toggleId = fs.dataset.conditional;
+    const checkbox = document.getElementById(toggleId);
+    if (checkbox) {
+      checkbox.addEventListener('change', syncConditionalSections);
+    }
   });
   syncConditionalSections();
 
