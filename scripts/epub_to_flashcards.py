@@ -176,57 +176,56 @@ def build_prompt(source_lang: str, target_lang: str, source_label: str,
 
 # ----------------------------- CSV parsing -----------------------------
 
-def parse_csv_response(response: str, source_label: str) -> list[tuple[str, str]]:
-    """Parse the model's CSV response. Tolerate stray markdown or commentary."""
+def parse_csv_response(
+    response: str,
+    source_label: str,
+    target_label: str | None = None,
+) -> list[tuple[str, str]]:
+    """Parse only a model response containing the requested CSV header."""
+    import csv
+    import io
+
     lines = response.splitlines()
+
+    def parse_line(raw: str) -> list[str] | None:
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("```"):
+            return None
+        line = re.sub(r"^[-*\d.\)\]]+\s*", "", line)
+        try:
+            fields = next(csv.reader(io.StringIO(line)))
+        except (csv.Error, StopIteration):
+            return None
+        return [field.strip() for field in fields]
+
+    header_index = None
+    for index, raw in enumerate(lines):
+        fields = parse_line(raw)
+        if not fields or len(fields) != 2:
+            continue
+        source_matches = fields[0].casefold() == source_label.casefold()
+        target_matches = target_label is None or fields[1].casefold() == target_label.casefold()
+        if source_matches and target_matches:
+            header_index = index
+            break
+
+    if header_index is None:
+        return []
+
     rows: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
+    for raw in lines[header_index + 1:]:
+        if raw.strip().startswith("```"):
+            if rows:
+                break
             continue
-        # strip leading list bullets / numbering
-        line = re.sub(r"^[-*\d.\)\]]+\s*", "", line)
-        # strip code fences
-        line = line.strip("`").strip()
-        # skip header
-        if line.lower().startswith(f"{source_label.lower()},") or line.lower().startswith("source,"):
+        fields = parse_line(raw)
+        if not fields or len(fields) != 2:
             continue
-        if "," not in line:
+        src, tgt = fields
+        if not src or not tgt or len(src) > 160 or len(tgt) > 500:
             continue
-
-        # Use csv.reader for proper quote handling (handles broken escapes)
-        import csv
-        import io
-        try:
-            parsed = list(csv.reader(io.StringIO(line)))
-            if not parsed or not parsed[0]:
-                continue
-            fields = parsed[0]
-            if len(fields) < 2:
-                # broken row — try last-resort split on the last comma
-                if "," in line:
-                    src, tgt = line.rsplit(",", 1)
-                    src = src.strip().strip('"').strip("'")
-                    tgt = tgt.strip().strip('"').strip("'")
-                else:
-                    continue
-            else:
-                # If more than 2 fields (because of broken quoting), join all but first
-                src = fields[0].strip()
-                tgt = ",".join(fields[1:]).strip()
-        except Exception:
-            # fallback to naive split
-            src, tgt = line.split(",", 1)
-            src = src.strip().strip('"').strip("'")
-            tgt = tgt.strip().strip('"').strip("'")
-
-        if not src or not tgt:
-            continue
-        # detect obvious garbage: line that starts with a stray quote from broken CSV
-        if src.startswith('"') and not src.endswith('"') and len(src) > 50:
-            continue
-        key = src.lower()
+        key = src.casefold()
         if key in seen:
             continue
         seen.add(key)
@@ -237,54 +236,40 @@ def parse_csv_response(response: str, source_label: str) -> list[tuple[str, str]
 def filter_rows_by_source_text(
     rows: list[tuple[str, str]], chapter_text: str
 ) -> list[tuple[str, str]]:
-    """Drop rows whose source-language phrase does not appear in the chapter text.
-
-    Uses case-insensitive substring matching. Handles a few common normalizations:
-    - Strips leading articles ("the", "el", "la", "un", "una") before matching
-    - Ignores punctuation differences by also trying a punctuation-stripped version
-    - Tolerates trailing/leading whitespace
-    """
+    """Keep rows whose complete source phrase appears in the chapter text."""
     if not chapter_text:
-        return rows
-    text_lower = chapter_text.lower()
-    # Build a punctuation-stripped version for fuzzy matching
-    text_stripped = re.sub(r"[^\w\s]", " ", text_lower)
-    text_stripped = re.sub(r"\s+", " ", text_stripped)
+        return []
 
-    LEADING_ARTICLES = (
+    def normalize(value: str) -> str:
+        value = re.sub(r"[^\w\s]", " ", value.casefold())
+        return re.sub(r"\s+", " ", value).strip()
+
+    normalized_text = normalize(chapter_text)
+    leading_articles = (
         "the ", "a ", "an ",
         "el ", "la ", "los ", "las ",
         "un ", "una ", "unos ", "unas ",
-        "to ",  # english infinitive marker
-        "a ",   # spanish preposition (a trabajar)
+        "to ",
     )
 
+    def appears(candidate: str) -> bool:
+        normalized = normalize(candidate)
+        if not normalized:
+            return False
+        pattern = rf"(?<!\w){re.escape(normalized)}(?!\w)"
+        return re.search(pattern, normalized_text) is not None
+
     kept: list[tuple[str, str]] = []
-    dropped = 0
     for src, tgt in rows:
-        src_strip = src.strip()
-        src_lower = src_strip.lower()
-        # try direct match
-        if src_lower in text_lower or src_lower in text_stripped:
-            kept.append((src_strip, tgt))
+        source = src.strip()
+        if appears(source):
+            kept.append((source, tgt))
             continue
-        # try without leading article
-        matched = False
-        for art in LEADING_ARTICLES:
-            if src_lower.startswith(art):
-                trimmed = src_lower[len(art):]
-                if trimmed in text_lower or trimmed in text_stripped:
-                    kept.append((src_strip, tgt))
-                    matched = True
-                    break
-        if matched:
-            continue
-        # last try: any 4+ char word from src appears in text (loose check)
-        words = re.findall(r"\b\w{4,}\b", src_lower)
-        if any(w in text_stripped for w in words):
-            kept.append((src_strip, tgt))
-            continue
-        dropped += 1
+        normalized_source = normalize(source)
+        for article in leading_articles:
+            if normalized_source.startswith(article) and appears(normalized_source[len(article):]):
+                kept.append((source, tgt))
+                break
     return kept
 
 
@@ -410,7 +395,7 @@ def main() -> int:
             except Exception as e:
                 print(f"    ERROR calling ollama: {e}", file=sys.stderr)
                 continue
-            rows = parse_csv_response(response, source_label)
+            rows = parse_csv_response(response, source_label, target_label)
             if not rows:
                 print(f"    no rows parsed; raw response was:")
                 print(response[:500])

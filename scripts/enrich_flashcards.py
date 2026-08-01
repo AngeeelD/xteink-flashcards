@@ -375,199 +375,61 @@ class StarDict:
 
 
 def extract_definition_and_translations(html: str) -> tuple[str, list[str], str]:
-    """Pull (definition, translations, pronunciation) out of StarDict HTML.
+    """Extract definition, translations, and pronunciation from a StarDict entry."""
+    from html import unescape
 
-    Two structures appear in wikdict.com StarDict entries:
+    pronunciation_pattern = re.compile(
+        r'<font\b[^>]*\bcolor=["\']gray["\'][^>]*>(.*?)</font>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    grammar_pattern = re.compile(
+        r'<font\b[^>]*\bclass=["\'][^"\']*\bgrammar\b[^"\']*["\'][^>]*>(.*?)</font>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    leaf_div_pattern = re.compile(
+        r'<div\b[^>]*>\s*([^<>]+?)\s*</div>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
 
-    Flat structure (most common): definition followed by sibling <div> translations:
-        <div>/<font color="gray">IPA1</font>/, .../<br>
-        <div><font class="grammar">noun</font></div>english definition
-        <div>spanish 1</div>
-        <div>spanish 2</div>
-        </div>
-
-    Nested structure (used for words with multiple senses):
-        <ol>
-          <li><div>sense 1 english</div><div>spanish1</div></li>
-          <li><div>sense 2 english</div><div>spanish2</div></li>
-        </ol>
-
-    Returns:
-        (definition, translations, pronunciation_ipa)
-    """
-    # 1) Extract pronunciation first — capture IPA from <font color="gray">
-    # The pronunciation is a single short word like "tekˈnäləjē"
     pronunciations: list[str] = []
-    for m in re.finditer(r'<font\s+color="gray"[^>]*>([^<]+)</font>', html):
-        ipa = m.group(1).strip()
-        if ipa and len(ipa) < 60:
-            pronunciations.append(ipa)
-    # Some entries have multiple pronunciation variants separated by ", /"
-    # Keep all of them — they reflect regional variation
-    pronunciation = " / ".join(pronunciations) if pronunciations else ""
+    for match in pronunciation_pattern.finditer(html):
+        value = unescape(re.sub(r"<[^>]+>", " ", match.group(1)))
+        value = re.sub(r"\s+", " ", value).strip(" /,")
+        if value and value not in pronunciations:
+            pronunciations.append(value)
 
-    # Wipe pronunciation blocks from the HTML
-    cleaned = re.sub(r'<font\s+color="gray"[^>]*>.*?</font>', " ", html, flags=re.DOTALL)
-    cleaned = re.sub(r"/[^/<>]{1,80}/", " ", cleaned)
-    cleaned = re.sub(r"\s*/\s*", " ", cleaned)
-    cleaned = re.sub(r"\s*,\s*", ", ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned)
-
-    # 2) Extract grammar tag
-    grammar_match = re.search(r'<font\s+class="grammar"[^>]*>([^<]+)</font>', cleaned)
-    grammar = grammar_match.group(1).strip() if grammar_match else ""
+    grammar_match = grammar_pattern.search(html)
+    grammar = ""
     if grammar_match:
-        cleaned = cleaned.replace(grammar_match.group(0), " ")
+        grammar = unescape(re.sub(r"<[^>]+>", " ", grammar_match.group(1)))
+        grammar = re.sub(r"\s+", " ", grammar).strip()
 
-    # 3) Find where English definition ends and translations begin.
-    # In flat structure: it's the first <div> with no grammar-style contents
-    # after the grammar tag. In nested: it's the first <ol>.
-    #
-    # Simpler heuristic: the english_part is the text between the grammar tag and
-    # either the <ol> OR the first <div> whose contents are pure Spanish (heuristic).
-
+    working = pronunciation_pattern.sub(" ", html)
+    working = grammar_pattern.sub(" ", working)
     translations: list[str] = []
+    seen_translations: set[str] = set()
 
-    # Detect <ol> first
-    ol_match = re.search(r"<ol[^>]*>", cleaned, flags=re.IGNORECASE)
-    if ol_match:
-        english_part = cleaned[: ol_match.start()]
-        translations_part = cleaned[ol_match.start():]
-        # extract from <li><div>X</div></li>
-        li_blocks = re.findall(r"<li[^>]*>(.*?)</li>",
-                                translations_part, flags=re.IGNORECASE | re.DOTALL)
-        seen: set[str] = set()
-        for li in li_blocks:
-            divs = re.findall(r"<div>([^<]+)</div>", li)
-            for d in divs:
-                d = d.strip()
-                if d and d not in seen:
-                    seen.add(d)
-                    translations.append(d)
-    else:
-        # Flat structure: the english definition and translations are siblings
-        # inside the outer <div>. We need to walk the string from the end backwards,
-        # extracting "<div>X</div>" pairs right before each closing </div>.
-        #
-        # Pattern at the end: ...english_def</div><div>es1</div></div>
-        # So we look for "<div>X</div></div>" runs from the end, taking X as
-        # a Spanish translation (short, no further nesting).
-        english_part = cleaned
+    def remove_translation(match: re.Match) -> str:
+        value = unescape(match.group(1))
+        value = re.sub(r"\s+", " ", value).strip()
+        key = value.casefold()
+        if value and key not in seen_translations:
+            seen_translations.add(key)
+            translations.append(value)
+        return " "
 
-        # Walk backwards: every time we see "</div>" at the cursor, check
-        # if it closes a "<div>X</div>" with X being short text.
-        # The trailing siblings are translations.
-        leaf_pattern = re.compile(r"<div>([^<>]{1,60}?)</div>", flags=re.IGNORECASE)
-
-        # Identify the trailing translation run by scanning from the end.
-        # A "leaf" at the end of the string is: <div>X</div> immediately followed
-        # only by </div>s and end-of-string.
-        end_pos = len(cleaned.rstrip())
-        translations_trailing: list[str] = []
-        cursor = end_pos
-
-        # Quick helper: is content between prev_div_end and current match just whitespace+</div>?
-        while cursor > 0:
-            # find the last "<div>X</div>" before cursor
-            region = cleaned[:cursor]
-            last = None
-            for m in leaf_pattern.finditer(region):
-                last = m
-            if not last:
-                break
-            # Check what's between last.end() and cursor
-            between = cleaned[last.end():cursor].strip()
-            if between and between != "</div>":
-                # not contiguous — stop
-                break
-            # Need the *last* matched leaf that's adjacent — re-find properly:
-            # we took the very last leaf in region, that's wrong.
-            break
-
-        # Simpler approach: greedy match "<div>([^<>]+)</div>(?:</div>)?" from end
-        # We walk backwards collecting the last N leaves where each is followed by </div>
-        # or end-of-string.
-        translations_trailing = []
-
-        # Find all leaves
-        leaves = list(leaf_pattern.finditer(cleaned))
-        if leaves:
-            # Walk from the end; collect contiguous trailing leaves
-            idx = len(leaves) - 1
-            tail: list = []
-            while idx >= 0:
-                leaf = leaves[idx]
-                if not tail:
-                    # last leaf: must end near end-of-string (after optional </div>)
-                    rest = cleaned[leaf.end():].strip()
-                    if rest in ("", "</div>"):
-                        tail.append(leaf)
-                else:
-                    # this leaf's end should be at previous tail's start (preceded by </div>)
-                    prev = tail[-1]
-                    between = cleaned[leaf.end():prev.start()].strip()
-                    if between in ("", "</div>"):
-                        tail.append(leaf)
-                    else:
-                        break
-                idx -= 1
-            tail.reverse()
-            seen: set[str] = set()
-            for m in tail:
-                d = m.group(1).strip()
-                if d and d not in seen:
-                    seen.add(d)
-                    translations_trailing.append(d)
-
-        # If we found a contiguous trailing block, those are translations.
-        # Otherwise, fall back to "all leaves after the grammar tag that aren't
-        # the english_def leaf".
-        if translations_trailing:
-            translations = translations_trailing
-        elif len(leaves) >= 2:
-            # Heuristic: first leaf is usually grammar+ipa, second is english_def,
-            # remaining are translations.
-            for m in leaves[2:]:
-                d = m.group(1).strip()
-                if d and d not in translations:
-                    translations.append(d)
-
-    # 4) Convert english_part to plain text
-    text = re.sub(r"<[^>]+>", " ", english_part)
-    text = re.sub(r"&nbsp;", " ", text)
-    text = re.sub(r"&amp;", "&", text)
-    text = re.sub(r"&lt;", "<", text)
-    text = re.sub(r"&gt;", ">", text)
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # 5) Trim trailing punctuation/whitespace, drop leading grammar-related commas
-    text = re.sub(r"^[\s,;:\.\|]+", "", text)
-    text = re.sub(r"[\s,;:\.\|]+$", "", text)
-
-    # 6) Use the first sentence / clause as the clean definition
-    definition = text
-    m = re.search(r"[.;]\s+[A-Z]", text)
-    if m:
-        first = text[: m.end() - 1].strip()
-        if len(first) > 5:
-            definition = first
-
-    # If translations are still embedded in the english text (flat structure),
-    # try to split on the first occurrence of any translation token
-    if translations:
-        # nothing to do — translations are already extracted
-        pass
-    else:
-        # Maybe translations are mixed into the text. Keep the whole text as def.
-        pass
-
-    translations = [t for t in translations if t]
+    definition_html = leaf_div_pattern.sub(remove_translation, working)
+    definition_html = re.sub(r"</?(?:br|li|ol|div)\b[^>]*>", " ", definition_html, flags=re.IGNORECASE)
+    definition_html = re.sub(r"<[^>]+>", " ", definition_html)
+    definition = unescape(definition_html)
+    definition = re.sub(r"^[\s/,;:|]+", "", definition)
+    definition = re.sub(r"[\s/,;:|]+$", "", definition)
+    definition = re.sub(r"\s+", " ", definition).strip()
 
     if grammar and definition:
         definition = f"{grammar}. {definition}"
-    elif grammar and not definition:
-        definition = grammar
 
+    pronunciation = " / ".join(pronunciations)
     return definition, translations, pronunciation
 
 
@@ -575,45 +437,87 @@ def extract_definition_and_translations(html: str) -> tuple[str, list[str], str]
 # OLLAMA — examples (optional)
 # ============================================================================
 
-EXAMPLES_PROMPT = """You are a lexicographer. Generate exactly ONE natural example sentence in {source_lang} for each of these {source_lang} words/phrases.
+EXAMPLES_AND_SYNONYMS_PROMPT = """You are a lexicographer. For each {source_lang} word below, generate one natural usage example and two to four accurate synonyms.
 
-Each example should:
-- Be 8-18 words long
-- Use the word naturally in context (the way a native speaker would)
-- NOT include translations or explanations
-- NOT include quotation marks
+Rules:
+- The example must be 8-18 words long and use the word naturally
+- Synonyms must be in {source_lang}, match the sense used in the example, and never be translations
+- Separate synonyms with " / "
+- If no accurate synonym exists, leave the synonyms field empty
+- Do not include explanations, markdown, or commentary
 
-Format STRICTLY as a CSV block with no commentary:
+Output exactly this CSV structure:
+word,example,synonyms
+{word1},example sentence,synonym 1 / synonym 2
+{word2},example sentence,synonym 1 / synonym 2
 
-word,example
-{word1},example sentence 1
-{word2},example sentence 2
-...
-
-Words/phrases to cover:
+Words:
 {word_list}
 
 CSV output:"""
 
 
-def ollama_batch_examples(
-    words: list[str], source_lang: str, model: str,
+def parse_examples_and_synonyms_response(
+    response: str,
+    requested_words: list[str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    allowed = {word.casefold() for word in requested_words}
+    examples: dict[str, str] = {}
+    synonyms: dict[str, str] = {}
+
+    for raw_line in response.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("```"):
+            continue
+        line = re.sub(r"^[-*\d.\)\]]+\s*", "", line)
+        try:
+            fields = next(csv.reader([line]))
+        except (csv.Error, StopIteration):
+            continue
+        if len(fields) < 3:
+            continue
+        word = fields[0].strip().strip('"').strip("'")
+        key = word.casefold()
+        if key == "word" or key not in allowed:
+            continue
+        example = ",".join(fields[1:-1]).strip().strip('"').strip("'")
+        synonym_text = fields[-1].strip().strip('"').strip("'")
+        if example:
+            examples[key] = example
+        seen: set[str] = set()
+        clean_synonyms: list[str] = []
+        for synonym in re.split(r"\s*(?:/|;|,)\s*", synonym_text):
+            synonym = synonym.strip().strip('"').strip("'")
+            synonym_key = synonym.casefold()
+            if not synonym or synonym_key == key or synonym_key in seen:
+                continue
+            seen.add(synonym_key)
+            clean_synonyms.append(synonym)
+        if clean_synonyms:
+            synonyms[key] = ", ".join(clean_synonyms[:4])
+
+    return examples, synonyms
+
+
+def ollama_batch_examples_and_synonyms(
+    words: list[str],
+    source_lang: str,
+    model: str,
     host: str = "http://localhost:11434",
-) -> dict[str, str]:
+) -> tuple[dict[str, str], dict[str, str]]:
     if not words:
-        return {}
-    word_list = "\n".join(f"- {w}" for w in words)
-    prompt = EXAMPLES_PROMPT.format(
+        return {}, {}
+    prompt = EXAMPLES_AND_SYNONYMS_PROMPT.format(
         source_lang=source_lang,
-        word_list=word_list,
+        word_list="\n".join(f"- {word}" for word in words),
         word1=words[0],
-        word2=words[1] if len(words) > 1 else "",
+        word2=words[1] if len(words) > 1 else words[0],
     )
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": 0.5, "num_ctx": 4096},
+        "options": {"temperature": 0.3, "num_ctx": 4096},
     }
     req = urllib.request.Request(
         f"{host}/api/generate",
@@ -622,20 +526,19 @@ def ollama_batch_examples(
     )
     with urllib.request.urlopen(req, timeout=300) as resp:
         response = json.loads(resp.read().decode("utf-8")).get("response", "").strip()
-    out: dict[str, str] = {}
-    for line in response.splitlines():
-        line = line.strip()
-        if not line or line.lower().startswith("word,"):
-            continue
-        line = re.sub(r"^[-*\d.\)\]]+\s*", "", line)
-        if "," not in line:
-            continue
-        src, ex = line.split(",", 1)
-        src = src.strip().strip('"').strip("'")
-        ex = ex.strip().strip('"').strip("'")
-        if src and ex:
-            out[src.lower()] = ex
-    return out
+    return parse_examples_and_synonyms_response(response, words)
+
+
+def ollama_batch_examples(
+    words: list[str],
+    source_lang: str,
+    model: str,
+    host: str = "http://localhost:11434",
+) -> dict[str, str]:
+    examples, _ = ollama_batch_examples_and_synonyms(
+        words, source_lang, model, host=host
+    )
+    return examples
 
 
 # ============================================================================
@@ -667,13 +570,13 @@ def write_enriched_csv(path: Path, rows: list[dict], append: bool = False) -> No
 def enrich_word(
     sd: StarDict, word: str, source_word: bool = True
 ) -> tuple[str, list[str], str]:
-    """Return (definition, list_of_synonym/translation candidates, pronunciation_ipa)."""
+    """Return definition, source-language synonyms, and pronunciation."""
     html = sd.lookup(word)
     if not html:
         return "", [], ""
-    definition, translations, pronunciation = extract_definition_and_translations(html)
-    syns = sd.synonyms(word) if source_word else []
-    return definition, translations + syns, pronunciation
+    definition, _, pronunciation = extract_definition_and_translations(html)
+    synonyms = sd.synonyms(word) if source_word else []
+    return definition, synonyms, pronunciation
 
 
 # ============================================================================
@@ -772,6 +675,8 @@ def process_epub(
             enriched: list[dict] = []
             for word in words:
                 definition, suggestions, pronunciation = enrich_word(sd, word)
+                if not definition.strip():
+                    continue
                 seen = set()
                 clean_syns = []
                 for s in suggestions:
@@ -794,17 +699,23 @@ def process_epub(
             if with_examples and enriched:
                 print(f"    generating examples via Ollama ({len(enriched)} words)...")
                 examples: dict[str, str] = {}
+                generated_synonyms: dict[str, str] = {}
                 for i in range(0, len(enriched), example_batch_size):
                     batch = [r["word"] for r in enriched[i:i + example_batch_size]]
                     try:
-                        examples.update(ollama_batch_examples(
+                        batch_examples, batch_synonyms = ollama_batch_examples_and_synonyms(
                             batch, source_lang, model,
-                        ))
+                        )
+                        examples.update(batch_examples)
+                        generated_synonyms.update(batch_synonyms)
                     except Exception as e:
                         print(f"    batch {i//example_batch_size + 1} failed: {e}",
                               file=sys.stderr)
                 for r in enriched:
-                    r["example"] = examples.get(r["word"].lower(), "")
+                    key = r["word"].casefold()
+                    r["example"] = examples.get(key, "")
+                    if generated_synonyms.get(key):
+                        r["synonyms"] = generated_synonyms[key]
 
             # 4. Write output
             if single_csv:
@@ -851,6 +762,8 @@ def process_csvs(
                 if not src:
                     continue
                 definition, suggestions, pronunciation = enrich_word(sd, src)
+                if not definition.strip():
+                    continue
                 seen = set()
                 clean_syns = []
                 for s in suggestions:
@@ -869,16 +782,22 @@ def process_csvs(
 
         if with_examples and rows_data:
             examples: dict[str, str] = {}
+            generated_synonyms: dict[str, str] = {}
             for i in range(0, len(rows_data), example_batch_size):
                 batch = [r["word"] for r in rows_data[i:i + example_batch_size]]
                 try:
-                    examples.update(ollama_batch_examples(
+                    batch_examples, batch_synonyms = ollama_batch_examples_and_synonyms(
                         batch, source_lang, model,
-                    ))
+                    )
+                    examples.update(batch_examples)
+                    generated_synonyms.update(batch_synonyms)
                 except Exception as e:
                     print(f"    batch failed: {e}", file=sys.stderr)
             for r in rows_data:
-                r["example"] = examples.get(r["word"].lower(), "")
+                key = r["word"].casefold()
+                r["example"] = examples.get(key, "")
+                if generated_synonyms.get(key):
+                    r["synonyms"] = generated_synonyms[key]
 
         write_enriched_csv(csv_out, rows_data)
         print(f"[+] {csv_in.name} -> {csv_out.name} ({len(rows_data)} items)")

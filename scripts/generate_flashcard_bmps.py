@@ -82,9 +82,9 @@ FONT_CANDIDATES = {
 
 
 def find_font(family: str, size: int, bold: bool = False, italic: bool = False) -> ImageFont.FreeTypeFont:
-    """Find a usable font for the given family + style."""
+    """Find a scalable font for the requested family and style."""
     if bold and italic:
-        key = "sans_bold"  # fallback; most files don't have explicit bold-italic
+        key = "sans_bold"
     elif italic:
         key = "serif_italic" if family == "serif" else "sans_italic"
     elif bold:
@@ -92,7 +92,6 @@ def find_font(family: str, size: int, bold: bool = False, italic: bool = False) 
     else:
         key = family
 
-    # If family=serif and not bold/italic, prefer the serif list directly
     if family == "serif" and not bold and not italic:
         candidates = FONT_CANDIDATES["serif"]
     else:
@@ -104,7 +103,7 @@ def find_font(family: str, size: int, bold: bool = False, italic: bool = False) 
                 return ImageFont.truetype(path, size)
             except Exception:
                 continue
-    return ImageFont.load_default()
+    raise RuntimeError(f"No scalable font found for {family}; install DejaVu fonts")
 
 
 # ----------------------------- Drawing primitives -----------------------------
@@ -166,17 +165,12 @@ def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH_DEFAULT
 
 def draw_section_title(draw, text: str, font, y: int,
                        x_left: int, x_right: int, fill: int = 0) -> int:
-    """Section title in caps, centered between x_left and x_right, with thin rule below."""
+    """Draw a bold uppercase section heading."""
     text = text.upper()
     w, h = measure(text, font)
     x = x_left + ((x_right - x_left) - w) // 2
     draw.text((x, y), text, font=font, fill=fill)
-    rule_y = y + h + 8
-    # Centered rule, narrower than the body width
-    rule_in = 40
-    draw.line([(x_left + rule_in, rule_y), (x_right - rule_in, rule_y)],
-              fill=fill, width=1)
-    return rule_y + 14  # body starts here
+    return y + h + 14
 
 
 def draw_body_lines(draw, lines: list[str], font, x: int, y: int,
@@ -198,6 +192,15 @@ def draw_body_lines(draw, lines: list[str], font, x: int, y: int,
 
 # ----------------------------- Card rendering -----------------------------
 
+def format_pronunciation(pronunciation: str, max_variants: int = 2) -> str:
+    variants = [part.strip().strip("/") for part in pronunciation.split(" / ")]
+    variants = [part for part in variants if part]
+    visible = [f"/{part}/" for part in variants[:max_variants]]
+    if len(variants) > max_variants:
+        visible.append("…")
+    return "  ".join(visible)
+
+
 def render_card(
     word: str,
     pronunciation: str,
@@ -212,6 +215,9 @@ def render_card(
     width: int = WIDTH_DEFAULT,
     height: int = HEIGHT_DEFAULT,
 ) -> None:
+    if not definition.strip():
+        raise ValueError("definition is required")
+
     # Local colors (avoids mutating module globals).
     bg = BG_DARK if darkmode else BG_LIGHT
     fg = FG_DARK if darkmode else FG_LIGHT
@@ -255,23 +261,13 @@ def render_card(
               fill=fg, width=1)
     y = underline_y + 22
 
-    # ----------- Pronunciation (italic small, centered) -----------
-    # Show at most 2 variants to keep the layout clean
-    if pronunciation:
-        ipa_to_show = pronunciation
-        # If multiple variants separated by " / ", keep first two
-        variants = [v.strip() for v in ipa_to_show.split(" / ") if v.strip()]
-        if len(variants) > 2:
-            ipa_to_show = " / ".join(variants[:2]) + "  …"
-        elif len(variants) == 0:
-            ipa_to_show = ""
-        else:
-            ipa_to_show = " / ".join(variants)
-
-        ipa_text = f"/{ipa_to_show}/"
-        ipa_w, ipa_h = measure(ipa_text, ipa_font)
-        if ipa_w > content_w:
-            # shrink font
+    # ----------- Pronunciation -----------
+    ipa_text = format_pronunciation(pronunciation)
+    if ipa_text:
+        y = draw_section_title(
+            draw, "Pronunciation", title_font, y, inner_x_left, inner_x_right, fill=fg
+        )
+        if measure(ipa_text, ipa_font)[0] > content_w:
             for size in [s(24), s(22), s(20)]:
                 candidate = find_font("serif", size, italic=True)
                 if measure(ipa_text, candidate)[0] <= content_w:
@@ -279,16 +275,7 @@ def render_card(
                     break
         draw.text(((width - measure(ipa_text, ipa_font)[0]) // 2, y), ipa_text,
                   font=ipa_font, fill=fg)
-        y += measure(ipa_text, ipa_font)[1] + 8
-
-    # ----------- Pronunciation label / helper -----------
-    # little "ipa" tag
-    if pronunciation:
-        tag = "pronunciation"
-        tag_font = small_font
-        tag_w, tag_h = measure(tag, tag_font)
-        draw.text(((width - tag_w) // 2, y), tag, font=tag_font, fill=fg)
-        y += tag_h + 20
+        y += measure(ipa_text, ipa_font)[1] + s(28)
 
     # ----------- Definition -----------
     y = draw_section_title(draw, "Definition", title_font, y, inner_x_left, inner_x_right, fill=fg)
@@ -298,17 +285,19 @@ def render_card(
     y += s(28)  # gap before next section
 
     # ----------- Usage / Example -----------
-    y = draw_section_title(draw, "Usage", title_font, y, inner_x_left, inner_x_right, fill=fg)
-    ex_lines = truncate_lines(example, body_font, content_w, max_lines=4)
-    y = draw_body_lines(draw, ex_lines, body_font, inner_x_left, y, content_w,
-                        line_spacing=8, fill=fg)
-    y += s(28)
+    if example.strip():
+        y = draw_section_title(draw, "Usage", title_font, y, inner_x_left, inner_x_right, fill=fg)
+        ex_lines = truncate_lines(example, body_font, content_w, max_lines=4)
+        y = draw_body_lines(draw, ex_lines, body_font, inner_x_left, y, content_w,
+                            line_spacing=8, fill=fg)
+        y += s(28)
 
     # ----------- Synonyms (italic, dictionary style) -----------
-    y = draw_section_title(draw, "Synonyms", title_font, y, inner_x_left, inner_x_right, fill=fg)
-    syn_lines = truncate_lines(synonyms, body_italic_font, content_w, max_lines=4)
-    y = draw_body_lines(draw, syn_lines, body_italic_font, inner_x_left, y, content_w,
-                        line_spacing=8, fill=fg)
+    if synonyms.strip():
+        y = draw_section_title(draw, "Synonyms", title_font, y, inner_x_left, inner_x_right, fill=fg)
+        syn_lines = truncate_lines(synonyms, body_italic_font, content_w, max_lines=4)
+        y = draw_body_lines(draw, syn_lines, body_italic_font, inner_x_left, y, content_w,
+                            line_spacing=8, fill=fg)
 
     # ----------- Footer: source on left, page number on right -----------
     footer_y = height - OUTER_MARGIN - CARD_PADDING - 8
@@ -380,7 +369,7 @@ def main() -> int:
     with csv_path.open(encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if (row.get("word") or "").strip():
+            if (row.get("word") or "").strip() and (row.get("definition") or "").strip():
                 rows.append(row)
     total = len(rows)
 

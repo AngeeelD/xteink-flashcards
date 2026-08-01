@@ -8,6 +8,7 @@ Upload an epub → get back either or both:
 Single job at a time (Ollama is a shared resource).
 """
 
+import csv
 import io
 import json
 import os
@@ -45,7 +46,7 @@ from enrich_flashcards import (  # noqa: E402
     StarDict,
     enrich_word,
     extract_vocabulary_for_chapter,
-    ollama_batch_examples,
+    ollama_batch_examples_and_synonyms,
     write_enriched_csv,
     LANG_NAMES,
     PROMPT_TEMPLATE as ENRICH_PROMPT,
@@ -92,6 +93,13 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _book_name_from_upload(filename: str | None) -> str:
+    normalized = (filename or "").replace("\\", "/")
+    basename = Path(normalized).name
+    book_name = Path(basename).stem.split(" -- ")[0].strip()
+    return book_name or "book"
+
+
 def _read_meta(job_id: str) -> dict:
     p = _meta_path(job_id)
     if not p.exists():
@@ -136,28 +144,46 @@ def _generate_bilingual_per_chapter(
         text = html_to_text(html)
         if len(text) < 200:
             continue
+        source_label = LANG_NAMES.get(source, source.capitalize())
+        target_label = LANG_NAMES.get(target, target.capitalize())
         prompt = build_bi_prompt(
             source_lang=LANG_NAMES.get(source, source),
             target_lang=LANG_NAMES.get(target, target),
-            source_label=LANG_NAMES.get(source, source.capitalize()),
-            target_label=LANG_NAMES.get(target, target.capitalize()),
+            source_label=source_label,
+            target_label=target_label,
             chapter_text=text,
             num_items=items,
         )
-        try:
-            response = ollama_generate_bi(prompt, OLLAMA_MODEL, host=OLLAMA_HOST)
-        except Exception as e:
-            print(f"[job] ollama failed for {stem}: {e}")
-            continue
-        rows = parse_bi_csv(response, source_label=LANG_NAMES.get(source, source.capitalize()))
-        rows = filter_bi_rows(rows, text)[:items]
+        rows: list[tuple[str, str]] = []
+        for attempt in range(2):
+            current_prompt = prompt
+            if attempt:
+                current_prompt += (
+                    "\n\nYour previous response was invalid. Start with exactly "
+                    f"{source_label},{target_label} and output CSV rows only."
+                )
+            try:
+                response = ollama_generate_bi(
+                    current_prompt, OLLAMA_MODEL, host=OLLAMA_HOST
+                )
+            except Exception as e:
+                print(f"[job] ollama failed for {stem}: {e}")
+                continue
+            rows = parse_bi_csv(
+                response,
+                source_label=source_label,
+                target_label=target_label,
+            )
+            rows = filter_bi_rows(rows, text)[:items]
+            if rows:
+                break
         if not rows:
             continue
         num = re.search(r"(\d+)", stem)
         num_s = num.group(1).zfill(3) if num else f"{i:03d}"
         out = csv_outdir / f"chapter_{num_s}.csv"
         with out.open("w", encoding="utf-8") as f:
-            f.write(f"{LANG_NAMES.get(source, source.capitalize())},{LANG_NAMES.get(target, target.capitalize())}\n")
+            f.write(f"{source_label},{target_label}\n")
             for src, tgt in rows:
                 def esc(s):
                     if "," in s or "\n" in s or '"' in s:
@@ -170,6 +196,7 @@ def _generate_bilingual_per_chapter(
 
 def _generate_bmps_per_chapter(
     epub_path: Path,
+    book_name: str,
     chapters: list[tuple[str, str]],
     source: str,
     items: int,
@@ -182,13 +209,13 @@ def _generate_bmps_per_chapter(
     width: int = WIDTH_DEFAULT,
     height: int = HEIGHT_DEFAULT,
 ) -> tuple[int, int]:
-    """Per-chapter enrichment + BMP rendering. If darkmode=True, BMPs are
-    rendered inverted (black bg, white fg)."""
+    """Generate one card set and render it consistently in light or dark mode."""
     bmp_outdir.mkdir(parents=True, exist_ok=True)
     enriched_csv_outdir.mkdir(parents=True, exist_ok=True)
     source_lang = LANG_NAMES.get(source, source)
     total = len(chapters)
     written = 0
+
     for i, (stem, internal) in enumerate(chapters, start=1):
         update_status(
             phase="bmp_dark" if darkmode else "bmp",
@@ -198,99 +225,112 @@ def _generate_bmps_per_chapter(
             chapters_done=i - 1,
             chapters_total=total,
         )
-        with open(epub_path, "rb") as f:
-            import zipfile
-            with zipfile.ZipFile(f) as zf:
-                html = zf.read(internal).decode("utf-8", errors="ignore")
-        text = html_to_text(html)
-        if len(text) < 200:
-            continue
-
-        # 1) extract vocabulary via Ollama
-        # extract_vocabulary_for_chapter uses ollama_generate internally with the
-        # default localhost host. To override, call it manually:
-        pool = int(items * 2.5)
-        prompt_enr = ENRICH_PROMPT.format(
-            source_lang=source_lang,
-            source_lang_cap=source_lang.capitalize(),
-            chapter_text=text[:12000],
-            num_items=items,
-            pool_size=pool,
-        )
-        try:
-            response_enr = ef_ollama_generate(prompt_enr, OLLAMA_MODEL, host=OLLAMA_HOST)
-        except Exception as e:
-            print(f"[job] enrich ollama failed for {stem}: {e}")
-            continue
-        words = parse_vocab_single_column(response_enr)
-        words = filter_words_by_source_text(words, text)
-        words = words[:items]
-
-        if not words:
-            continue
-
-        # 2) enrich each word with StarDict
-        enriched: list[dict] = []
-        for word in words:
-            definition, suggestions, pronunciation = enrich_word(sd, word)
-            seen = set()
-            clean_syns = []
-            for s in suggestions:
-                sl = s.lower()
-                if sl in seen or sl == word.lower():
-                    continue
-                seen.add(sl)
-                clean_syns.append(s)
-            enriched.append({
-                "word": word,
-                "definition": definition,
-                "pronunciation": pronunciation,
-                "example": "",
-                "synonyms": ", ".join(clean_syns[:6]),
-                "chapter": stem,
-                "book": epub_path.stem.split(" -- ")[0],
-            })
-
-        # 3) examples (optional)
-        if with_examples and enriched:
-            update_status(phase_label=f"Examples for {stem} ({i}/{total})")
-            try:
-                examples = ollama_batch_examples(
-                    [r["word"] for r in enriched], source_lang, OLLAMA_MODEL,
-                )
-                for r in enriched:
-                    r["example"] = examples.get(r["word"].lower(), "")
-            except Exception as e:
-                print(f"[job] examples failed for {stem}: {e}")
-
-        # 4) write enriched CSV (only once — re-use between light and dark)
         num = re.search(r"(\d+)", stem)
         num_s = num.group(1).zfill(3) if num else f"{i:03d}"
         enriched_csv_path = enriched_csv_outdir / f"chapter_{num_s}.csv"
-        if not enriched_csv_path.exists():
-            write_enriched_csv(enriched_csv_path, enriched, append=False)
 
-        # 5) render BMPs
-        for j, row in enumerate(enriched):
-            bmp_path = bmp_outdir / f"chapter_{num_s}_{j:03d}_{re.sub(r'[^a-z0-9]+', '_', row['word'].lower()).strip('_')[:30]}.bmp"
+        if darkmode:
+            if not enriched_csv_path.exists():
+                continue
+            with enriched_csv_path.open(encoding="utf-8", newline="") as csv_file:
+                enriched = [
+                    row
+                    for row in csv.DictReader(csv_file)
+                    if (row.get("word") or "").strip()
+                    and (row.get("definition") or "").strip()
+                ]
+        else:
+            with open(epub_path, "rb") as epub_file:
+                import zipfile
+                with zipfile.ZipFile(epub_file) as archive:
+                    html = archive.read(internal).decode("utf-8", errors="ignore")
+            text = html_to_text(html)
+            if len(text) < 200:
+                continue
+
+            pool = int(items * 2.5)
+            prompt_enr = ENRICH_PROMPT.format(
+                source_lang=source_lang,
+                source_lang_cap=source_lang.capitalize(),
+                chapter_text=text[:12000],
+                num_items=items,
+                pool_size=pool,
+            )
             try:
-                render_card(
-                    word=row["word"],
-                    pronunciation=row.get("pronunciation", ""),
-                    definition=row["definition"],
-                    example=row["example"],
-                    synonyms=row["synonyms"],
-                    book_name=row["book"],
-                    page_no=j + 1,
-                    total_pages=len(enriched),
-                    output_path=bmp_path,
-                    darkmode=darkmode,
-                    width=width,
-                    height=height,
+                response_enr = ef_ollama_generate(
+                    prompt_enr, OLLAMA_MODEL, host=OLLAMA_HOST
                 )
             except Exception as e:
-                print(f"[job] bmp render failed for {row['word']}: {e}")
+                print(f"[job] enrich ollama failed for {stem}: {e}")
+                continue
+            words = parse_vocab_single_column(response_enr)
+            words = filter_words_by_source_text(words, text)[:items]
+
+            enriched: list[dict] = []
+            for word in words:
+                definition, suggestions, pronunciation = enrich_word(sd, word)
+                if not definition.strip():
+                    continue
+                seen: set[str] = set()
+                clean_syns: list[str] = []
+                for suggestion in suggestions:
+                    key = suggestion.casefold()
+                    if key in seen or key == word.casefold():
+                        continue
+                    seen.add(key)
+                    clean_syns.append(suggestion)
+                enriched.append({
+                    "word": word,
+                    "definition": definition,
+                    "pronunciation": pronunciation,
+                    "example": "",
+                    "synonyms": ", ".join(clean_syns[:6]),
+                    "chapter": stem,
+                    "book": book_name,
+                })
+
+            if with_examples and enriched:
+                update_status(phase_label=f"Examples for {stem} ({i}/{total})")
+                try:
+                    examples, generated_synonyms = ollama_batch_examples_and_synonyms(
+                        [row["word"] for row in enriched],
+                        source_lang,
+                        OLLAMA_MODEL,
+                        host=OLLAMA_HOST,
+                    )
+                    for row in enriched:
+                        key = row["word"].casefold()
+                        row["example"] = examples.get(key, "")
+                        if generated_synonyms.get(key):
+                            row["synonyms"] = generated_synonyms[key]
+                except Exception as e:
+                    print(f"[job] examples failed for {stem}: {e}")
+
+        if not enriched:
+            continue
+
+        for j, row in enumerate(enriched):
+            slug = re.sub(r"[^a-z0-9]+", "_", row["word"].lower()).strip("_")[:30]
+            bmp_path = bmp_outdir / f"chapter_{num_s}_{j:03d}_{slug}.bmp"
+            render_card(
+                word=row["word"],
+                pronunciation=row.get("pronunciation", ""),
+                definition=row["definition"],
+                example=row.get("example", ""),
+                synonyms=row.get("synonyms", ""),
+                book_name=row.get("book", book_name),
+                page_no=j + 1,
+                total_pages=len(enriched),
+                output_path=bmp_path,
+                darkmode=darkmode,
+                width=width,
+                height=height,
+            )
+
+        if not darkmode:
+            write_enriched_csv(enriched_csv_path, enriched, append=False)
         written += len(enriched)
+
     return written, total
 
 
@@ -298,6 +338,10 @@ def _zip_dir(dirpath: Path, outpath: Path) -> int:
     """Zip every file under dirpath (flat). Returns file count."""
     outpath.parent.mkdir(parents=True, exist_ok=True)
     files = sorted(p for p in dirpath.rglob("*") if p.is_file())
+    if not files:
+        if outpath.exists():
+            outpath.unlink()
+        return 0
     with zipfile.ZipFile(outpath, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for f in files:
             zf.write(f, arcname=f.relative_to(dirpath))
@@ -316,6 +360,7 @@ def _run_job(job_id: str, config: dict) -> None:
     bmp_dir = job_dir / "bmp"
     enriched_csv_dir = job_dir / "enriched"
     epub_path = UPLOADS_DIR / f"{job_id}.epub"
+    book_name = _book_name_from_upload(config.get("original_filename"))
 
     def update(**kw):
         m = _read_meta(job_id)
@@ -368,7 +413,10 @@ def _run_job(job_id: str, config: dict) -> None:
             update(phase="zipping", phase_label=f"Zipping {csv_written} CSV files…")
             zip_path = job_dir / "flashcards.zip"
             n = _zip_dir(csv_dir, zip_path)
-            update(flashcards_zip=f"jobs/{job_id}/flashcards.zip", flashcards_count=n)
+            update(
+                flashcards_zip=(f"jobs/{job_id}/flashcards.zip" if n else None),
+                flashcards_count=n,
+            )
 
         # ---------- Phase B: enriched + BMPs ----------
         if config.get("generate_bmp"):
@@ -385,7 +433,7 @@ def _run_job(job_id: str, config: dict) -> None:
 
             # Pass B1: light-mode BMPs (always)
             bmp_written, _ = _generate_bmps_per_chapter(
-                epub_path, chapters,
+                epub_path, book_name, chapters,
                 source=source,
                 items=config["items"],
                 with_examples=config.get("with_examples", False),
@@ -400,19 +448,23 @@ def _run_job(job_id: str, config: dict) -> None:
             update(phase="zipping", phase_label=f"Zipping {bmp_written} light BMPs…")
             zip_path = job_dir / "screensaver.zip"
             n = _zip_dir(bmp_dir, zip_path)
-            update(screensaver_zip=f"jobs/{job_id}/screensaver.zip", bmp_count=n,
-                   device=device, bmp_resolution=f"{bmp_w}x{bmp_h}")
+            update(
+                screensaver_zip=(f"jobs/{job_id}/screensaver.zip" if n else None),
+                bmp_count=n,
+                device=device,
+                bmp_resolution=f"{bmp_w}x{bmp_h}",
+            )
 
             # Pass B2: dark-mode BMPs (only if requested).
             if config.get("darkmode"):
                 dark_bmp_dir = job_dir / "bmp_dark"
                 bmp_dark_written, _ = _generate_bmps_per_chapter(
-                    epub_path, chapters,
+                    epub_path, book_name, chapters,
                     source=source,
                     items=config["items"],
                     with_examples=config.get("with_examples", False),
                     bmp_outdir=dark_bmp_dir,
-                    enriched_csv_outdir=enriched_csv_dir,  # re-use (skip if exists)
+                    enriched_csv_outdir=enriched_csv_dir,
                     sd=sd,
                     update_status=update,
                     darkmode=True,
@@ -422,8 +474,12 @@ def _run_job(job_id: str, config: dict) -> None:
                 update(phase="zipping", phase_label=f"Zipping {bmp_dark_written} dark BMPs…")
                 dark_zip_path = job_dir / "screensaver_dark.zip"
                 nd = _zip_dir(dark_bmp_dir, dark_zip_path)
-                update(screensaver_dark_zip=f"jobs/{job_id}/screensaver_dark.zip",
-                       bmp_dark_count=nd)
+                update(
+                    screensaver_dark_zip=(
+                        f"jobs/{job_id}/screensaver_dark.zip" if nd else None
+                    ),
+                    bmp_dark_count=nd,
+                )
 
         # ---------- Done ----------
         meta = _read_meta(job_id)
@@ -536,14 +592,16 @@ def download(job_id, kind):
     meta = _read_meta(job_id)
     if meta.get("status") != "done":
         abort(409, "Job not finished yet")
-    if kind == "flashcards":
-        path = JOBS_DIR / job_id / "flashcards.zip"
-        filename = f"{job_id}_flashcards.zip"
-    elif kind == "screensaver":
-        path = JOBS_DIR / job_id / "screensaver.zip"
-        filename = f"{job_id}_screensaver.zip"
-    else:
-        abort(404)
+    archives = {
+        "flashcards": "flashcards.zip",
+        "screensaver": "screensaver.zip",
+        "screensaver_dark": "screensaver_dark.zip",
+    }
+    archive_name = archives.get(kind)
+    if archive_name is None:
+        return abort(404)
+    path = JOBS_DIR / job_id / archive_name
+    filename = f"{job_id}_{archive_name}"
     if not path.exists():
         abort(404, "Output not generated (you didn't request that output)")
     return send_file(
