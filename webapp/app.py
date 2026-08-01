@@ -66,6 +66,7 @@ from generate_flashcard_bmps import (  # noqa: E402
     render_card,
     WIDTH_DEFAULT, HEIGHT_DEFAULT,
     WIDTH_X4, HEIGHT_X4,
+    find_font,
     list_available_fonts,
     section_titles_for,
 )
@@ -678,7 +679,25 @@ def _run_job(job_id: str, config: dict) -> None:
 def index():
     active = _read_meta(_active_job_id) if _active_job_id else None
     fonts = list_available_fonts()
-    return render_template("index.html", active_job=active, fonts=fonts)
+    default_font = _resolve_default_font()
+    return render_template(
+        "index.html",
+        active_job=active,
+        fonts=fonts,
+        default_font=default_font,
+    )
+
+
+def _resolve_default_font() -> str | None:
+    """Return the filesystem path of the font render_card would use when the
+    user picks the '(default)' option. Resolved server-side so the browser
+    can log it on page load — useful for deciding which files to bundle in
+    the Docker image."""
+    try:
+        font = find_font("serif", 56, bold=False)
+    except RuntimeError:
+        return None
+    return getattr(font, "path", None) or str(font)
 
 
 @app.route("/upload", methods=["POST"])

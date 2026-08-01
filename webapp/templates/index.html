@@ -265,8 +265,11 @@
   // ---- Font picker diagnostics ------------------------------------------
   // Log the currently selected font (label + server-side path) so the user
   // can identify which font files on the server are worth bundling in the
-  // Docker image. Fires once on load and again whenever the dropdown
-  // changes.
+  // Docker image. The default option is resolved server-side via
+  // find_font() so the user can see exactly which font the curated list
+  // picked up on this host.
+  const DEFAULT_FONT = {{ default_font|tojson if default_font else 'null' }};
+
   function logSelectedFont() {
     const value = bmpFont.value;
     const label =
@@ -276,6 +279,9 @@
       console.log(`[font] path:    ${value}`);
     } else {
       console.log('[font] selected: (default — first available curated font)');
+      if (DEFAULT_FONT) {
+        console.log(`[font] path:    ${DEFAULT_FONT}`);
+      }
     }
   }
   bmpFont.addEventListener('change', logSelectedFont);

@@ -457,6 +457,34 @@ def _stub_bmp_render(**kwargs):
     img.save(output_path, format="BMP")
 
 
+class DefaultFontTests(unittest.TestCase):
+    def test_resolve_default_font_returns_a_path(self):
+        """The resolved default font path is non-empty on hosts with at
+        least one curated candidate installed."""
+        path = webapp._resolve_default_font()
+        self.assertTrue(path, "expected a font path on the test host")
+        self.assertIsInstance(path, str)
+
+    def test_resolve_default_font_handles_missing_fonts(self):
+        """When find_font raises, the helper returns None instead of
+        propagating the RuntimeError to the index route."""
+        with patch.object(webapp, "find_font",
+                          side_effect=RuntimeError("no fonts")):
+            self.assertIsNone(webapp._resolve_default_font())
+
+    def test_index_route_exposes_default_font_to_the_template(self):
+        """The rendered index page contains a JS constant with the path of
+        the font the curated default will use."""
+        with patch.object(webapp, "_resolve_default_font",
+                          return_value="/System/Library/Fonts/Palatino.ttc"), \
+             patch.object(webapp, "list_available_fonts", return_value=[]), \
+             patch.object(webapp, "_active_job_id", None):
+            response = webapp.app.test_client().get("/")
+            html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("/System/Library/Fonts/Palatino.ttc", html)
+
+
 class PreviewEndpointTests(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
