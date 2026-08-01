@@ -262,6 +262,25 @@
   bmpEnabled.addEventListener('change', refreshPreview);
   bmpDevice.addEventListener('change', syncDeviceFrame);
 
+  // ---- Font picker diagnostics ------------------------------------------
+  // Log the currently selected font (label + server-side path) so the user
+  // can identify which font files on the server are worth bundling in the
+  // Docker image. Fires once on load and again whenever the dropdown
+  // changes.
+  function logSelectedFont() {
+    const value = bmpFont.value;
+    const label =
+      bmpFont.options[bmpFont.selectedIndex]?.text || '(default)';
+    if (value) {
+      console.log(`[font] selected: ${label}`);
+      console.log(`[font] path:    ${value}`);
+    } else {
+      console.log('[font] selected: (default — first available curated font)');
+    }
+  }
+  bmpFont.addEventListener('change', logSelectedFont);
+  logSelectedFont();
+
   syncDeviceFrame();
   setTimeout(refreshPreview, 100);
 
