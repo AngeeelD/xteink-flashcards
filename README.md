@@ -24,6 +24,33 @@ Upload an epub. Pick your languages. Get back **one or both** of:
 
 Each archive is regenerated from scratch on every run, so you can iterate freely while reading.
 
+## Screenshots
+
+### Web upload form
+
+The form splits outputs into two sections (Flashcards and Screensaver)
+with independent source language, chapter range, items and font. The
+screensaver settings include a live preview inside a CSS-only Xteink
+device frame that updates as you change the dropdowns and reuses the
+same `render_card` pipeline as real jobs.
+
+![Web app](docs/screenshots/web-app.png)
+
+### Output cards
+
+Screensaver BMPs are rendered at the device's native resolution with a
+dictionary-entry layout: word + underline at the top, pronunciation,
+definition, optional usage example and source-language synonyms.
+
+Light variant:
+
+![Light card](docs/screenshots/card-light.png)
+
+Dark variant — the exclusive toggle delivers only this archive and
+no light ZIP:
+
+![Dark card](docs/screenshots/card-dark.png)
+
 ## Why it exists
 
 Off-the-shelf e-readers don't have a great vocabulary-acquisition workflow. The Xteink X3 supports dictionary lookup and a sleep-image screensaver, but neither learns your book. This tool bridges that gap by:
