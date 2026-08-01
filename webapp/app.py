@@ -650,6 +650,9 @@ def _run_job(job_id: str, config: dict) -> None:
         meta["finished_at"] = _now_iso()
         meta["phase"] = "done"
         meta["phase_label"] = "Done."
+        # Fill the progress bar: the per-chapter updates leave chapters_done
+        # at i-1 of the last chapter, so the bar shows 0/N. Snap it to total.
+        meta["chapters_done"] = meta.get("chapters_total", meta.get("chapters_done", 0))
         _write_meta(job_id, meta)
 
     except Exception as e:

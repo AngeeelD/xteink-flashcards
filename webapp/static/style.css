@@ -186,8 +186,11 @@ select:focus-visible {
 }
 
 /* ---------- Buttons ---------- */
+/* Anchors tagged role="button" (the download links on the job page) share
+ * the full button styling so they don't render as plain underlined text. */
 button,
-.button {
+.button,
+a[role="button"] {
   font-family: var(--f-mono);
   font-size: 0.85rem;
   text-transform: uppercase;
@@ -201,23 +204,22 @@ button,
   cursor: pointer;
   box-shadow: var(--shadow-hard);
   transition: transform 80ms ease-out, box-shadow 80ms ease-out;
-}
-
-button[role="button"],
-a[role="button"] {
   display: inline-block;
   text-decoration: none;
   margin: var(--s-2) var(--s-2) var(--s-2) 0;
 }
 
 button:hover,
-.button:hover {
+.button:hover,
+a[role="button"]:hover {
   transform: translate(-2px, -2px);
   box-shadow: 6px 6px 0 0 var(--c-text);
+  color: var(--c-surface);
 }
 
 button:active,
-.button:active {
+.button:active,
+a[role="button"]:active {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0 0 var(--c-text);
 }

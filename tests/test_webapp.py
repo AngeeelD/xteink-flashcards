@@ -400,6 +400,51 @@ class DownloadTests(unittest.TestCase):
         # BMPs run on chapter 002-003.
         self.assertGreaterEqual(meta["bmp_light_count"], 2)
 
+    def test_done_state_fills_chapters_done_counter(self):
+        """When a job finishes, chapters_done is snapped to chapters_total
+        so the progress bar on the job page ends at 100%."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jobs_dir = Path(tmpdir)
+            upload_dir = Path(tmpdir) / "uploads"
+            upload_dir.mkdir()
+            with patch.object(webapp, "JOBS_DIR", jobs_dir), \
+                 patch.object(webapp, "UPLOADS_DIR", upload_dir), \
+                 patch.object(
+                     webapp, "ef_ollama_generate", return_value="word\nrefactoring"
+                 ), patch.object(
+                     webapp, "enrich_word",
+                     return_value=("noun. process in which code is refactored", [], ""),
+                 ), patch.object(
+                     webapp, "render_card",
+                     side_effect=lambda **kwargs: kwargs["output_path"].write_bytes(b"bmp"),
+                 ):
+                job_id = "abcdef0123"
+                epub_path = upload_dir / f"{job_id}.epub"
+                with zipfile.ZipFile(epub_path, "w") as archive:
+                    for n in (1, 2, 3):
+                        archive.writestr(
+                            f"chapter_{n:03d}.xhtml",
+                            "<p>refactoring " + "context " * 40 + "</p>",
+                        )
+
+                config = {
+                    "csv_enabled": False,
+                    "bmp_enabled": True,
+                    "bmp_source": "en",
+                    "bmp_items": 1,
+                    "bmp_device": "x3",
+                    "bmp_dark": False,
+                    "bmp_with_examples": False,
+                    "device": "x3",
+                    "original_filename": "book.epub",
+                }
+                webapp._run_job(job_id, dict(config))
+                meta = webapp._read_meta(job_id)
+
+        self.assertEqual(meta["status"], "done")
+        self.assertEqual(meta["chapters_total"], 3)
+        self.assertEqual(meta["chapters_done"], meta["chapters_total"])
+
 
 def _stub_bmp_render(**kwargs):
     """Replace render_card with a function that writes a tiny placeholder BMP."""
