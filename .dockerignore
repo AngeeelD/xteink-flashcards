@@ -1,0 +1,12 @@
+# Skip local development artifacts; let COPY pick up the rest.
+**/__pycache__
+**/*.pyc
+.git
+.gitignore
+.DS_Store
+README.md
+AGENTS.md
+tutorial.pdf
+*.epub
+bmp/
+**/bmp/

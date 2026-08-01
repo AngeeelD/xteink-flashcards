@@ -1,31 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
 
-<form action="/upload" method="post" enctype="multipart/form-data">
+<form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
 
-  <label for="epub">Epub file</label>
-  <input type="file" id="epub" name="epub" accept=".epub" required>
+  <fieldset>
+    <legend>Book</legend>
+    <label for="epub">Epub file</label>
+    <input type="file" id="epub" name="epub" accept=".epub" required>
+  </fieldset>
 
-  <div class="grid">
-    <div>
-      <label for="source">Source language</label>
-      <select id="source" name="source">
-        <option value="en" selected>English</option>
-        <option value="es">Spanish</option>
-      </select>
+  <fieldset>
+    <legend>Languages & cadence</legend>
+    <div class="grid">
+      <div>
+        <label for="source">Source language</label>
+        <select id="source" name="source">
+          <option value="en" selected>English</option>
+          <option value="es">Spanish</option>
+        </select>
+      </div>
+      <div>
+        <label for="target">Target language</label>
+        <select id="target" name="target">
+          <option value="es" selected>Spanish</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <div>
+        <label for="items">Words per chapter</label>
+        <input type="number" id="items" name="items" value="30" min="5" max="100">
+      </div>
     </div>
-    <div>
-      <label for="target">Target language</label>
-      <select id="target" name="target">
-        <option value="es" selected>Spanish</option>
-        <option value="en">English</option>
-      </select>
-    </div>
-    <div>
-      <label for="items">Items per chapter</label>
-      <input type="number" id="items" name="items" value="30" min="5" max="100">
-    </div>
-  </div>
+  </fieldset>
 
   <fieldset>
     <legend>Chapter range (optional)</legend>
@@ -38,45 +44,51 @@
         <label for="end">End chapter</label>
         <input type="number" id="end" name="end" placeholder="last" min="1">
       </div>
+      <div>
+        <label for="device">E-reader</label>
+        <select id="device" name="device">
+          <option value="x3" selected>Xteink X3 &nbsp;·&nbsp; 528 × 792</option>
+          <option value="x4">Xteink X4 &nbsp;·&nbsp; 480 × 800</option>
+        </select>
+      </div>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>Outputs</legend>
-
-    <div>
-      <label for="device">E-reader device</label>
-      <select id="device" name="device">
-        <option value="x3" selected>Xteink X3 (528 × 792)</option>
-        <option value="x4">Xteink X4 (480 × 800)</option>
-      </select>
-    </div>
-
     <label>
       <input type="checkbox" id="generate_csv" name="generate_csv" checked>
-      <strong>flashcards.zip</strong> — per-chapter bilingual CSVs (English|Spanish)
+      <strong>flashcards.zip</strong> — bilingual CSVs (English | Spanish)
     </label>
     <label>
       <input type="checkbox" id="generate_bmp" name="generate_bmp" checked>
-      <strong>screensaver.zip</strong> — BMPs for the chosen device's lock screen
+      <strong>screensaver.zip</strong> — BMPs at the chosen device's resolution
     </label>
     <label>
       <input type="checkbox" id="darkmode" name="darkmode">
-      Dark-mode BMPs (black background, white text) — adds a second archive
+      Dark-mode variant (black background, white text)
     </label>
     <label>
       <input type="checkbox" id="with_examples" name="with_examples">
-      Include usage examples in BMPs (slower; per-chapter LLM call)
+      Include usage examples in BMPs (slower; one extra LLM call per chapter)
     </label>
   </fieldset>
 
-  <button type="submit" id="submit-btn">Start processing</button>
+  <button type="submit" id="submit-btn">Generate flashcards</button>
+
+  <p class="subhead" style="margin-top: var(--s-4);">
+    Files are saved on the server under <code>webapp/jobs/&lt;id&gt;/</code>. They stay there
+    until you delete them — re-run any time.
+  </p>
+
 </form>
 
 {% if active_job %}
 <article aria-label="Active job">
-  <header><strong>Active job</strong> — <code>{{ active_job.id }}</code></header>
-  <p>Status: <strong>{{ active_job.status }}</strong> ({{ active_job.phase_label }})</p>
+  <header>
+    <strong>Active job <code>{{ active_job.id }}</code></strong>
+    <span class="phase">{{ active_job.status }} · {{ active_job.phase_label }}</span>
+  </header>
   {% if active_job.status == 'done' %}
     {% if active_job.flashcards_zip %}
       <a href="/download/{{ active_job.id }}/flashcards" role="button">Download flashcards.zip</a>
@@ -84,16 +96,34 @@
     {% if active_job.screensaver_zip %}
       <a href="/download/{{ active_job.id }}/screensaver" role="button">Download screensaver.zip</a>
     {% endif %}
+    {% if active_job.screensaver_dark_zip %}
+      <a href="/download/{{ active_job.id }}/screensaver_dark" role="button">Download screensaver_dark.zip</a>
+    {% endif %}
   {% endif %}
 </article>
 {% endif %}
 
 <script>
+  // Disable button only after the browser has already started the submission.
+  // Use the form's `submit` event (not button `click`) so this works even if
+  // JS is slow, the user double-clicks, or a browser extension delays.
+  const form = document.getElementById('upload-form');
   const btn = document.getElementById('submit-btn');
-  btn.addEventListener('click', () => {
-    btn.disabled = true;
-    btn.textContent = 'Uploading…';
-  });
+  if (form && btn) {
+    let submitted = false;
+    form.addEventListener('submit', () => {
+      submitted = true;
+      btn.disabled = true;
+      btn.textContent = 'Uploading…';
+    });
+    // Safety: if the form never actually submits (validation, network error),
+    // re-enable the button after a few seconds so the user can try again.
+    setTimeout(() => {
+      if (!submitted) {
+        btn.disabled = false;
+      }
+    }, 8000);
+  }
 </script>
 
 {% endblock %}

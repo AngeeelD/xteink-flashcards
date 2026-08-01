@@ -11,11 +11,11 @@
 
   <div id="progress-area">
     <progress id="progress-bar" value="0" max="100"></progress>
-    <small id="progress-text">waiting…</small>
+    <small id="progress-text">starting…</small>
   </div>
 
   {% if meta.error %}
-  <p style="color: var(--pico-color-red-500);"><strong>Error:</strong> {{ meta.error }}</p>
+  <p class="error"><strong>Error:</strong> {{ meta.error }}</p>
   {% endif %}
 
   <div id="downloads" hidden>
@@ -23,7 +23,7 @@
     <div id="downloads-list"></div>
   </div>
 
-  <p><a href="/">← Back to upload form</a></p>
+  <p style="margin-top: var(--s-5);"><a href="/">← Back to upload form</a></p>
 </article>
 
 <script>
@@ -47,6 +47,14 @@
     }
   }
 
+  function addDownload(url, label) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.role = 'button';
+    a.textContent = label;
+    downloadsListEl.appendChild(a);
+  }
+
   async function poll() {
     try {
       const r = await fetch(`/job/${jobId}/status.json`, { cache: 'no-store' });
@@ -65,18 +73,16 @@
         downloadsEl.hidden = false;
         downloadsListEl.innerHTML = '';
         if (m.flashcards_zip) {
-          const a = document.createElement('a');
-          a.href = `/download/${jobId}/flashcards`;
-          a.role = 'button';
-          a.textContent = `flashcards.zip (${m.flashcards_count || 0} files)`;
-          downloadsListEl.appendChild(a);
+          addDownload(`/download/${jobId}/flashcards`,
+                      `flashcards.zip (${m.flashcards_count || 0} files)`);
         }
         if (m.screensaver_zip) {
-          const a = document.createElement('a');
-          a.href = `/download/${jobId}/screensaver`;
-          a.role = 'button';
-          a.textContent = `screensaver.zip (${m.bmp_count || 0} BMPs)`;
-          downloadsListEl.appendChild(a);
+          addDownload(`/download/${jobId}/screensaver`,
+                      `screensaver.zip (${m.bmp_count || 0} BMPs @ ${m.bmp_resolution || '?'})`);
+        }
+        if (m.screensaver_dark_zip) {
+          addDownload(`/download/${jobId}/screensaver_dark`,
+                      `screensaver_dark.zip (${m.bmp_dark_count || 0} BMPs)`);
         }
         return;
       }
