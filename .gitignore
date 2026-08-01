@@ -9,6 +9,7 @@ venv/
 webapp/uploads/
 webapp/jobs/
 webapp/previews/
+webapp/fonts/
 webapp/static/bmp/
 
 # Generated flashcards for the e-reader (regenerated per session)

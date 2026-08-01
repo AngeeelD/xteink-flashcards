@@ -81,12 +81,17 @@ WEBAPP_DIR = Path(__file__).resolve().parent
 JOBS_DIR = WEBAPP_DIR / "jobs"
 UPLOADS_DIR = WEBAPP_DIR / "uploads"
 PREVIEWS_DIR = WEBAPP_DIR / "previews"
+CUSTOM_FONTS_DIR = WEBAPP_DIR / "fonts"
 WIKTDICT_EN_ES = WEBAPP_DIR.parent / "wikdict-en-es"
 WIKTDICT_ES_EN = WEBAPP_DIR.parent / "wikdict-es-en"
 
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+CUSTOM_FONTS_DIR.mkdir(parents=True, exist_ok=True)
+
+ALLOWED_FONT_EXTS = {".ttf", ".otf", ".ttc"}
+MAX_FONT_BYTES = 10 * 1024 * 1024  # 10 MB cap per font file
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
@@ -678,7 +683,7 @@ def _run_job(job_id: str, config: dict) -> None:
 @app.route("/")
 def index():
     active = _read_meta(_active_job_id) if _active_job_id else None
-    fonts = list_available_fonts()
+    fonts = _fonts_for_picker()
     default_font = _resolve_default_font()
     return render_template(
         "index.html",
@@ -698,6 +703,34 @@ def _resolve_default_font() -> str | None:
     except RuntimeError:
         return None
     return getattr(font, "path", None) or str(font)
+
+
+def _fonts_for_picker() -> list[dict[str, str]]:
+    """Return the dropdown data: system fonts from generate_flashcard_bmps
+    plus any user-uploaded fonts in CUSTOM_FONTS_DIR."""
+    entries = list(list_available_fonts())
+    seen = {entry["path"] for entry in entries}
+    if CUSTOM_FONTS_DIR.exists():
+        for pattern in ("*.ttf", "*.otf", "*.ttc"):
+            for match in sorted(CUSTOM_FONTS_DIR.glob(pattern)):
+                path_str = str(match)
+                if path_str in seen:
+                    continue
+                seen.add(path_str)
+                entries.append({
+                    "path": path_str,
+                    "label": f"{match.name} (custom)",
+                    "family": match.stem,
+                })
+    return entries
+
+
+def _safe_font_filename(filename: str) -> str:
+    """Reduce a user-supplied filename to a safe on-disk form: only ascii
+    letters, digits, dots, dashes and underscores are kept; everything
+    else collapses to underscores. Prevents path traversal."""
+    name = Path(filename).name
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "custom.ttf"
 
 
 @app.route("/upload", methods=["POST"])
@@ -852,6 +885,42 @@ def preview():
         mimetype="image/png",
         max_age=3600,
     )
+
+
+@app.route("/upload-font", methods=["POST"])
+def upload_font():
+    """Accept a user-supplied font file and store it in CUSTOM_FONTS_DIR.
+
+    The uploaded file becomes available in the screensaver font dropdown
+    on the next page render. Used when the container or host doesn't ship
+    the font the user wants to use for their cards.
+    """
+    if "font" not in request.files:
+        abort(400, "No font file uploaded")
+    file = request.files["font"]
+    if not file.filename:
+        abort(400, "Empty filename")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_FONT_EXTS:
+        abort(400, f"Unsupported font format: {ext}. Use .ttf, .otf or .ttc.")
+
+    # Validate size before saving.
+    file.stream.seek(0, os.SEEK_END)
+    size = file.stream.tell()
+    file.stream.seek(0)
+    if size > MAX_FONT_BYTES:
+        abort(400, f"Font file is too large ({size} bytes; max {MAX_FONT_BYTES}).")
+
+    safe_name = _safe_font_filename(file.filename)
+    target = CUSTOM_FONTS_DIR / safe_name
+    file.save(target)
+
+    return jsonify({
+        "path": str(target),
+        "label": f"{target.name} (custom)",
+        "family": target.stem,
+    })
 
 
 @app.route("/health")

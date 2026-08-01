@@ -330,6 +330,33 @@ article .phase {
   margin: 0;
 }
 
+/* ---------- Custom font upload ---------- */
+.custom-font {
+  margin-top: var(--s-3);
+}
+
+.custom-font input[type="file"] {
+  font-size: 0.8rem;
+}
+
+.custom-font-status {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin: var(--s-2) 0 0 0;
+  min-height: 1em;
+  color: var(--c-muted);
+}
+
+.custom-font-status[data-state="ok"] {
+  color: var(--c-success);
+}
+
+.custom-font-status[data-state="error"] {
+  color: var(--c-danger);
+}
+
 /* ---------- Device frame around the live preview ---------- */
 /* A pure-CSS approximation of the Xteink X3 / X4 plastic bezel so the
  * user sees the card roughly the same way it sits on-device. The screen

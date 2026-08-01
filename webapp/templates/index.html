@@ -102,6 +102,13 @@
         </select>
       </div>
     </div>
+    <div class="custom-font">
+      <label for="bmp_font_upload" class="subhead">
+        Or upload your own font (.ttf / .otf / .ttc, max 10 MB)
+      </label>
+      <input type="file" id="bmp_font_upload" accept=".ttf,.otf,.ttc">
+      <p class="custom-font-status" id="font-upload-status"></p>
+    </div>
     <div class="checkbox-row">
       <label>
         <input type="checkbox" id="bmp_with_examples" name="bmp_with_examples">
@@ -286,6 +293,60 @@
   }
   bmpFont.addEventListener('change', logSelectedFont);
   logSelectedFont();
+
+  // ---- Custom font upload ------------------------------------------------
+  // Accepts a .ttf / .otf / .ttc from the user, POSTs it to /upload-font,
+  // and on success the dropdown gets a new entry selected. Used when
+  // the container or host doesn't ship the font the user wants to use.
+  const fontUpload = document.getElementById('bmp_font_upload');
+  const fontUploadStatus = document.getElementById('font-upload-status');
+
+  function setUploadStatus(text, state) {
+    if (!fontUploadStatus) return;
+    fontUploadStatus.textContent = text || '';
+    if (state) {
+      fontUploadStatus.dataset.state = state;
+    } else {
+      delete fontUploadStatus.dataset.state;
+    }
+  }
+
+  fontUpload.addEventListener('change', () => {
+    const file = fontUpload.files[0];
+    if (!file) return;
+    setUploadStatus(`uploading ${file.name}…`, '');
+
+    const formData = new FormData();
+    formData.append('font', file);
+
+    fetch('/upload-font', { method: 'POST', body: formData })
+      .then((r) => {
+        if (!r.ok) {
+          return r.text().then((body) => { throw new Error(body || 'upload failed'); });
+        }
+        return r.json();
+      })
+      .then((data) => {
+        // Inject (or replace) the option and select it.
+        const existing = Array.from(bmpFont.options).find(
+          (opt) => opt.value === data.path,
+        );
+        if (!existing) {
+          const opt = document.createElement('option');
+          opt.value = data.path;
+          opt.textContent = data.label;
+          bmpFont.appendChild(opt);
+        }
+        bmpFont.value = data.path;
+        logSelectedFont();
+        refreshPreview();
+        setUploadStatus(`uploaded → ${data.path}`, 'ok');
+      })
+      .catch((err) => {
+        console.error('[font] upload failed:', err);
+        setUploadStatus(`upload failed: ${err.message || err}`, 'error');
+      });
+  });
 
   syncDeviceFrame();
   setTimeout(refreshPreview, 100);

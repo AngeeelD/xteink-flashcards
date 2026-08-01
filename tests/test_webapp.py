@@ -1,3 +1,4 @@
+import io
 import json
 import sys
 import tempfile
@@ -483,6 +484,85 @@ class DefaultFontTests(unittest.TestCase):
             html = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
         self.assertIn("/System/Library/Fonts/Palatino.ttc", html)
+
+
+class CustomFontTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._fonts_dir = Path(self._tmpdir.name) / "fonts"
+        self._fonts_dir.mkdir()
+        self._patch = patch.object(webapp, "CUSTOM_FONTS_DIR", self._fonts_dir)
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        self._tmpdir.cleanup()
+
+    def test_upload_font_accepts_valid_file(self):
+        client = webapp.app.test_client()
+        # Minimal TTF header so the size check passes; we don't validate
+        # that Pillow can actually load it (we're testing the route, not
+        # the renderer).
+        data = {
+            "font": (io.BytesIO(b"\x00\x01\x00\x00" + b"x" * 100), "CustomSans.ttf"),
+        }
+        response = client.post("/upload-font", data=data, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["path"].endswith("CustomSans.ttf"))
+        self.assertEqual(payload["family"], "CustomSans")
+        self.assertTrue((self._fonts_dir / "CustomSans.ttf").exists())
+
+    def test_upload_font_rejects_unsupported_extension(self):
+        client = webapp.app.test_client()
+        data = {
+            "font": (io.BytesIO(b"\x00\x01"), "evil.exe"),
+        }
+        response = client.post("/upload-font", data=data, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse((self._fonts_dir / "evil.exe").exists())
+
+    def test_upload_font_rejects_oversized_file(self):
+        client = webapp.app.test_client()
+        # MAX_FONT_BYTES + 1 bytes
+        oversize = b"\x00" * (webapp.MAX_FONT_BYTES + 1)
+        data = {
+            "font": (io.BytesIO(oversize), "huge.ttf"),
+        }
+        response = client.post("/upload-font", data=data, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse((self._fonts_dir / "huge.ttf").exists())
+
+    def test_upload_font_sanitizes_filename(self):
+        client = webapp.app.test_client()
+        data = {
+            "font": (io.BytesIO(b"\x00\x01\x00\x00"), "../../etc/passwd.ttf"),
+        }
+        response = client.post("/upload-font", data=data, content_type="multipart/form-data")
+        # Should sanitize the filename rather than let it traverse.
+        self.assertEqual(response.status_code, 200)
+        # The saved file should be inside the fonts dir, not at /etc/passwd.
+        files_in_dir = list(self._fonts_dir.iterdir())
+        self.assertEqual(len(files_in_dir), 1)
+        self.assertTrue(files_in_dir[0].name.endswith(".ttf"))
+        self.assertNotIn("..", files_in_dir[0].name)
+
+    def test_fonts_for_picker_includes_uploaded_fonts(self):
+        # Drop a font file into the custom fonts dir directly.
+        self._fonts_dir.joinpath("MyCustom.otf").write_bytes(b"x")
+        entries = webapp._fonts_for_picker()
+        custom = [e for e in entries if "MyCustom" in e["label"]]
+        self.assertEqual(len(custom), 1)
+        self.assertTrue(custom[0]["label"].endswith("(custom)"))
+
+    def test_index_route_exposes_uploaded_fonts_in_dropdown(self):
+        self._fonts_dir.joinpath("UserPick.otf").write_bytes(b"x")
+        with patch.object(webapp, "_active_job_id", None), \
+             patch.object(webapp, "_resolve_default_font", return_value=None):
+            response = webapp.app.test_client().get("/")
+            html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("UserPick.otf (custom)", html)
 
 
 class PreviewEndpointTests(unittest.TestCase):
