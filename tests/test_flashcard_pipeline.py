@@ -2,7 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from PIL import ImageFont
 
@@ -296,6 +296,78 @@ class BmpRenderingTests(unittest.TestCase):
         truetype.assert_called()
         called_paths = [call.args[0] for call in truetype.call_args_list]
         self.assertTrue(any("CustomSans.ttf" in str(path) for path in called_paths))
+
+    def test_draw_centered_text_shrinks_via_mock(self):
+        """Direct: shrink-to-fit shrinks the size and stops when it fits."""
+        big_font = MagicMock(spec=ImageFont.FreeTypeFont)
+        big_font.size = 60
+
+        sizes_used: list[int] = []
+
+        def fake_find(family, size, **kwargs):
+            sizes_used.append(size)
+            f = MagicMock(spec=ImageFont.FreeTypeFont)
+            f.size = size
+            return f
+
+        def fake_measure(text, font):
+            return (font.size * 10, font.size // 2)
+
+        with patch.object(bmp, "find_font", side_effect=fake_find), \
+             patch.object(bmp, "measure", side_effect=fake_measure):
+            bmp.draw_centered_text(
+                MagicMock(), "Xteink Flashcards", big_font, 0, width=240,
+            )
+
+        self.assertTrue(sizes_used, "find_font was not called")
+        self.assertLess(min(sizes_used), 60)
+
+    def test_draw_centered_text_skips_shrink_when_text_already_fits(self):
+        font = MagicMock(spec=ImageFont.FreeTypeFont)
+        font.size = 20
+
+        sizes_used: list[int] = []
+
+        def fake_find(family, size, **kwargs):
+            sizes_used.append(size)
+            f = MagicMock(spec=ImageFont.FreeTypeFont)
+            f.size = size
+            return f
+
+        with patch.object(bmp, "find_font", side_effect=fake_find), \
+             patch.object(bmp, "measure", return_value=(100, 20)):
+            bmp.draw_centered_text(MagicMock(), "refactoring", font, 0, width=240)
+
+        self.assertEqual(sizes_used, [])
+
+    def test_truncate_lines_shrinks_when_token_is_wider_than_max_width(self):
+        """Long URLs that can't be split still fit by shrinking the font."""
+        big_font = MagicMock(spec=ImageFont.FreeTypeFont)
+        big_font.size = 30
+
+        sizes_used: list[int] = []
+
+        def fake_find(family, size, **kwargs):
+            sizes_used.append(size)
+            f = MagicMock(spec=ImageFont.FreeTypeFont)
+            f.size = size
+            return f
+
+        def fake_measure(text, font):
+            return (font.size * 100, font.size // 2)
+
+        with patch.object(bmp, "find_font", side_effect=fake_find), \
+             patch.object(bmp, "measure", side_effect=fake_measure):
+            lines = bmp.truncate_lines(
+                "xtctool.com/flashcard-generator",
+                big_font, max_width=200, max_lines=4,
+            )
+
+        # The single long token still fits because the font was shrunk.
+        self.assertEqual(len(lines), 1)
+        self.assertIn("xtctool", lines[0])
+        self.assertTrue(sizes_used, "find_font was not called")
+        self.assertLess(min(sizes_used), 30)
 
 
 if __name__ == "__main__":

@@ -211,14 +211,40 @@ def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[s
 
 
 def truncate_lines(text: str, font: ImageFont.FreeTypeFont,
-                   max_width: int, max_lines: int) -> list[str]:
-    lines = wrap_text(text, font, max_width)
+                   max_width: int, max_lines: int,
+                   family: str = "sans", bold: bool = False,
+                   italic: bool = False) -> list[str]:
+    """Wrap text into lines that each fit within `max_width`.
+
+    Safe-area behaviour: if any wrapped line is still wider than
+    `max_width` (the usual culprit is a long URL or compound word that
+    cannot be split on a space), the font is shrunk in 3-pt steps until
+    every line fits or the size floor (10-pt) is reached. Only after the
+    shrink succeeds do we cap at `max_lines` and add the ellipsis.
+    """
+    if not text:
+        return [""]
+    current_font = font
+    for _ in range(6):
+        lines = wrap_text(text, current_font, max_width)
+        widest = max((measure(line, current_font)[0] for line in lines), default=0)
+        if widest <= max_width:
+            break
+        new_size = max(10, getattr(current_font, "size", 24) - 3)
+        if new_size >= getattr(current_font, "size", 24):
+            break
+        try:
+            current_font = find_font(family, new_size, bold=bold, italic=italic)
+        except RuntimeError:
+            break
+
+    lines = wrap_text(text, current_font, max_width)
     if len(lines) > max_lines:
         lines = lines[:max_lines]
         last = lines[-1]
         while True:
             test = last.rstrip(",.;:- ") + "…"
-            if measure(test, font)[0] <= max_width or len(last) <= 4:
+            if measure(test, current_font)[0] <= max_width or len(last) <= 4:
                 lines[-1] = test
                 break
             last = last[:-1]
@@ -226,16 +252,36 @@ def truncate_lines(text: str, font: ImageFont.FreeTypeFont,
 
 
 def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH_DEFAULT,
-                       fill: int = 0, shadow: bool = False, dy: int = 1) -> int:
+                       fill: int = 0, shadow: bool = False, dy: int = 1,
+                       family: str = "serif", bold: bool = False) -> int:
+    """Draw text horizontally centered on `width`.
+
+    Safe-area behaviour: if `text` would overflow the card's content area
+    (`width` minus the outer margin and card padding on each side), the
+    font is shrunk in 4-pt steps until the text fits or hits a 14-pt floor.
+    Without this, long words or wide user-selected fonts can poke past
+    the inner border and land outside the bezel.
+    """
     text = text.strip()
     if not text:
         return y
-    w, h = measure(text, font)
+    safe_width = width - 2 * OUTER_MARGIN - 2 * CARD_PADDING
+    current_font = font
+    w, h = measure(text, current_font)
+    while w > safe_width and getattr(current_font, "size", 0) > 14:
+        new_size = max(14, getattr(current_font, "size", 14) - 4)
+        if new_size == getattr(current_font, "size", 0):
+            break
+        try:
+            current_font = find_font(family, new_size, bold=bold)
+        except RuntimeError:
+            break
+        w, h = measure(text, current_font)
     x = (width - w) // 2
     if shadow:
         # subtle 1-pixel shadow (in 1-bit, this just outlines slightly)
-        draw.text((x + dy, y + dy), text, font=font, fill=fill)
-    draw.text((x, y), text, font=font, fill=fill)
+        draw.text((x + dy, y + dy), text, font=current_font, fill=fill)
+    draw.text((x, y), text, font=current_font, fill=fill)
     return y + h
 
 
@@ -429,7 +475,9 @@ def render_card(
         y = draw_section_title(
             draw, titles["synonyms"], title_font, y, inner_x_left, inner_x_right, fill=fg
         )
-        syn_lines = truncate_lines(synonyms, body_italic_font, content_w, max_lines=4)
+        syn_lines = truncate_lines(
+            synonyms, body_italic_font, content_w, max_lines=4, italic=True
+        )
         y = draw_body_lines(draw, syn_lines, body_italic_font, inner_x_left, y, content_w,
                             line_spacing=8, fill=fg)
 
