@@ -80,9 +80,49 @@ FONT_CANDIDATES = {
     ],
 }
 
+# Extra scan directories used only when the curated candidates above fail.
+# Useful when the container has not been rebuilt with `fonts-dejavu-core`
+# or when running on the Mac mini host where additional TTFs are available.
+_EXTRA_FONT_ROOTS = (
+    "/System/Library/Fonts/Supplemental",
+    "/System/Library/Fonts",
+    "/Library/Fonts",
+    "/usr/share/fonts",
+    "/usr/local/share/fonts",
+    "/host-fonts",
+)
 
-def find_font(family: str, size: int, bold: bool = False, italic: bool = False) -> ImageFont.FreeTypeFont:
-    """Find a scalable font for the requested family and style."""
+
+def discover_system_fonts() -> list[Path]:
+    """Return every TTF/TTC font found in well-known system locations."""
+    seen: set[Path] = set()
+    fonts: list[Path] = []
+    for root in _EXTRA_FONT_ROOTS:
+        root_path = Path(root)
+        if not root_path.exists():
+            continue
+        for pattern in ("*.ttf", "*.ttc", "*.otf"):
+            for match in root_path.rglob(pattern):
+                if match in seen:
+                    continue
+                seen.add(match)
+                fonts.append(match)
+    return fonts
+
+
+def find_font(
+    family: str,
+    size: int,
+    bold: bool = False,
+    italic: bool = False,
+    extra_roots: tuple[str, ...] | None = None,
+) -> ImageFont.FreeTypeFont:
+    """Find a scalable font for the requested family and style.
+
+    Falls back to a runtime scan of system fonts when the curated
+    candidates list is empty (e.g. the container has not been
+    rebuilt with DejaVu fonts).
+    """
     if bold and italic:
         key = "sans_bold"
     elif italic:
@@ -103,7 +143,43 @@ def find_font(family: str, size: int, bold: bool = False, italic: bool = False) 
                 return ImageFont.truetype(path, size)
             except Exception:
                 continue
-    raise RuntimeError(f"No scalable font found for {family}; install DejaVu fonts")
+
+    extra_seen: set[str] = set()
+    for candidate in candidates:
+        extra_seen.add(candidate)
+    roots = tuple(extra_roots) if extra_roots is not None else _EXTRA_FONT_ROOTS
+    for root in roots:
+        root_path = Path(root)
+        if not root_path.exists():
+            continue
+        for match in root_path.rglob("*.ttf"):
+            if str(match) in extra_seen:
+                continue
+            try:
+                return ImageFont.truetype(match, size)
+            except Exception:
+                continue
+
+    raise RuntimeError(
+        f"No scalable font found for {family}; install DejaVu fonts (apt-get install fonts-dejavu-core)"
+    )
+
+
+def list_available_fonts() -> list[dict[str, str]]:
+    """Return a deduplicated list of fonts available for the picker."""
+    seen: set[str] = set()
+    entries: list[dict[str, str]] = []
+    for candidate in discover_system_fonts():
+        path_str = str(candidate)
+        if path_str in seen:
+            continue
+        seen.add(path_str)
+        entries.append({
+            "path": path_str,
+            "label": candidate.name,
+            "family": candidate.stem,
+        })
+    return entries
 
 
 # ----------------------------- Drawing primitives -----------------------------

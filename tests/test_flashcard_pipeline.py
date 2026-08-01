@@ -211,10 +211,29 @@ class BmpRenderingTests(unittest.TestCase):
 
     def test_missing_scalable_fonts_raise_instead_of_silently_falling_back(self):
         candidates = {key: ["/missing/font.ttf"] for key in bmp.FONT_CANDIDATES}
-
-        with patch.object(bmp, "FONT_CANDIDATES", candidates):
+        with patch.object(bmp, "FONT_CANDIDATES", candidates), patch.object(
+            bmp, "_EXTRA_FONT_ROOTS", ("/tmp/no-fonts-here-12345",)
+        ):
             with self.assertRaisesRegex(RuntimeError, "install DejaVu fonts"):
                 bmp.find_font("serif", 56)
+
+    def test_finds_font_via_extra_roots_when_curated_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fonts_dir = Path(tmpdir)
+            ttf_path = fonts_dir / "CustomSans.ttf"
+            ttf_path.write_bytes(b"\x00\x01\x00\x00")
+
+            with patch.dict(bmp.FONT_CANDIDATES, {"serif": ["/missing/font.ttf"], "sans": ["/missing/font.ttf"], "sans_bold": ["/missing/font.ttf"], "serif_italic": ["/missing/font.ttf"], "sans_italic": ["/missing/font.ttf"], "mono": ["/missing/font.ttf"]}), patch.object(
+                bmp, "_EXTRA_FONT_ROOTS", (str(fonts_dir),)
+            ), patch.object(
+                bmp.ImageFont, "truetype", return_value=bmp.ImageFont.load_default()
+            ) as truetype:
+                font = bmp.find_font("serif", 56)
+
+        self.assertIsInstance(font, bmp.ImageFont.FreeTypeFont)
+        truetype.assert_called()
+        called_paths = [call.args[0] for call in truetype.call_args_list]
+        self.assertTrue(any("CustomSans.ttf" in str(path) for path in called_paths))
 
 
 if __name__ == "__main__":
