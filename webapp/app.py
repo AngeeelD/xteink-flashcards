@@ -14,17 +14,20 @@ Single job at a time (Ollama is a shared resource).
 """
 
 import csv
+import hashlib
 import io
 import json
 import os
 import re
 import sys
+import tempfile
 import threading
 import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image
 from flask import (
     Flask,
     abort,
@@ -64,9 +67,12 @@ from generate_flashcard_bmps import (  # noqa: E402
     WIDTH_DEFAULT, HEIGHT_DEFAULT,
     WIDTH_X4, HEIGHT_X4,
     list_available_fonts,
+    section_titles_for,
 )
 
 # ----------------------------------------------------------------------------
+
+APP_VERSION = "0.5.0"
 
 app = Flask(__name__)
 
@@ -430,6 +436,8 @@ def _render_bmps_per_chapter(
     width: int,
     height: int,
     update_status,
+    font_path: str | None = None,
+    source_lang: str | None = None,
 ) -> tuple[int, int]:
     """Render light or dark BMPs from previously-enriched CSVs.
 
@@ -442,6 +450,7 @@ def _render_bmps_per_chapter(
         return 0, 0
     total = len(enriched_paths)
     written = 0
+    titles = section_titles_for(source_lang)
 
     for i, enriched_csv_path in enumerate(enriched_paths, start=1):
         update_status(
@@ -480,6 +489,8 @@ def _render_bmps_per_chapter(
                 darkmode=darkmode,
                 width=width,
                 height=height,
+                font_path=font_path,
+                section_titles=titles,
             )
         written += len(enriched)
 
@@ -604,6 +615,8 @@ def _run_job(job_id: str, config: dict) -> None:
                 width=bmp_w,
                 height=bmp_h,
                 update_status=update,
+                font_path=config.get("bmp_font"),
+                source_lang=bmp_source,
             )
             update(
                 phase="zipping",
@@ -758,12 +771,11 @@ def preview():
     The preview always uses the existing `render_card` so what the user sees
     matches what they will get for any real chapter card.
     """
-    import hashlib
-
     payload = request.get_json(silent=True) or {}
     font = (payload.get("font") or "").strip() or None
     darkmode = bool(payload.get("darkmode"))
     with_examples = bool(payload.get("with_examples"))
+    source_lang = (payload.get("source_lang") or "").strip() or None
     device = payload.get("device") or "x3"
     if device == "x4":
         width, height = WIDTH_X4, HEIGHT_X4
@@ -785,14 +797,13 @@ def preview():
         "font": font or "",
         "darkmode": darkmode,
         "with_examples": with_examples,
+        "source_lang": source_lang or "",
         "width": width,
         "height": height,
     }.items()))
     fingerprint = hashlib.sha256(fingerprint_src.encode()).hexdigest()[:16]
     cache_path = PREVIEWS_DIR / f"{fingerprint}.png"
     if not cache_path.exists():
-        import tempfile
-        from PIL import Image
         with tempfile.TemporaryDirectory() as tmp:
             bmp_path = Path(tmp) / "card.bmp"
             render_card(
@@ -801,13 +812,15 @@ def preview():
                 definition=definition,
                 example=example if with_examples else "",
                 synonyms=synonyms,
-                book_name="Xteink Flashcards",
+                book_name=f"Xteink Flashcards · v{APP_VERSION}",
                 page_no=1,
                 total_pages=1,
                 output_path=bmp_path,
                 darkmode=darkmode,
                 width=width,
                 height=height,
+                font_path=font,
+                section_titles=section_titles_for(source_lang),
             )
             with Image.open(bmp_path) as img:
                 img.save(cache_path, format="PNG")

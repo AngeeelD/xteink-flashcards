@@ -105,14 +105,14 @@
     <div class="checkbox-row">
       <label>
         <input type="checkbox" id="bmp_with_examples" name="bmp_with_examples">
-        Include usage examples (slower; one extra LLM call per chapter)
+        Include usage examples and source-language synonyms (slower; one extra LLM call per chapter)
       </label>
       <label>
         <input type="checkbox" id="bmp_dark" name="bmp_dark">
         Dark mode (exclusive: delivers only screensaver_dark.zip)
       </label>
     </div>
-    <figure class="preview">
+    <figure class="preview" id="preview-figure">
       <img id="preview-img" src="" alt="Live preview of the selected screensaver card" />
       <figcaption>Live preview · updates as you change settings</figcaption>
     </figure>
@@ -153,11 +153,13 @@
   // render_card pipeline as real jobs so what the user sees matches what
   // they'll get.
   const previewImg = document.getElementById('preview-img');
+  const previewFigure = document.getElementById('preview-figure');
   const bmpEnabled = document.getElementById('bmp_enabled');
   const bmpDark = document.getElementById('bmp_dark');
   const bmpWithExamples = document.getElementById('bmp_with_examples');
   const bmpDevice = document.getElementById('bmp_device');
   const bmpFont = document.getElementById('bmp_font');
+  const bmpSource = document.getElementById('bmp_source');
 
   function collectPreviewPayload() {
     return {
@@ -165,9 +167,33 @@
       with_examples: bmpWithExamples.checked,
       device: bmpDevice.value,
       font: bmpFont.value,
+      source_lang: bmpSource.value,
     };
   }
 
+  function syncPreviewChrome() {
+    // The container background follows the variant so the preview never
+    // looks like a black frame around a light card (or vice versa).
+    previewFigure.classList.toggle('preview-dark', bmpDark.checked);
+  }
+
+  // ---- Conditional fieldsets --------------------------------------------
+  // Each output section has a `data-conditional="<checkbox-id>"` attribute
+  // and is hidden when its parent checkbox is unchecked.
+  function syncConditionalSections() {
+    document.querySelectorAll('fieldset[data-conditional]').forEach((fs) => {
+      const toggleId = fs.dataset.conditional;
+      const checkbox = document.getElementById(toggleId);
+      if (!checkbox) return;
+      fs.hidden = !checkbox.checked;
+    });
+  }
+  document.querySelectorAll('input[type=checkbox][data-controls]').forEach((cb) => {
+    cb.addEventListener('change', syncConditionalSections);
+  });
+  syncConditionalSections();
+
+  // ---- Preview refresh --------------------------------------------------
   let previewTimer = null;
   function refreshPreview() {
     if (!bmpEnabled.checked) {
@@ -175,9 +201,9 @@
       previewImg.alt = 'Enable the screensaver output to see a live preview.';
       return;
     }
+    syncPreviewChrome();
     const payload = collectPreviewPayload();
     const body = JSON.stringify(payload);
-    // Cache-bust via a timestamp so the browser always re-fetches.
     const url = '/preview?t=' + Date.now();
     fetch(url, {
       method: 'POST',
@@ -204,16 +230,13 @@
     previewTimer = setTimeout(refreshPreview, 250);
   }
 
-  // Trigger a refresh on any input change inside the screensaver settings.
   ['change', 'input'].forEach((evt) => {
     document
       .getElementById('bmp-settings')
       .addEventListener(evt, debouncedRefresh);
   });
-  // Re-evaluate when the user toggles the screensaver output itself.
   bmpEnabled.addEventListener('change', refreshPreview);
 
-  // First paint: fetch once after a short delay so the page is interactive.
   setTimeout(refreshPreview, 100);
 
   // ---- Submit-button protection -----------------------------------------

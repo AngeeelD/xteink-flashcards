@@ -277,6 +277,31 @@ def format_pronunciation(pronunciation: str, max_variants: int = 2) -> str:
     return "  ".join(visible)
 
 
+# Section titles rendered on each card. The keys match the canonical English
+# labels; `render_card` looks up the localized value for the source language.
+SECTION_TITLES: dict[str, dict[str, str]] = {
+    "en": {
+        "pronunciation": "Pronunciation",
+        "definition": "Definition",
+        "usage": "Usage",
+        "synonyms": "Synonyms",
+    },
+    "es": {
+        "pronunciation": "Pronunciación",
+        "definition": "Definición",
+        "usage": "Uso",
+        "synonyms": "Sinónimos",
+    },
+}
+
+
+def section_titles_for(source_lang: str | None) -> dict[str, str]:
+    """Return the section-title dict for a source language code (e.g. 'en')."""
+    if not source_lang:
+        return SECTION_TITLES["en"]
+    return SECTION_TITLES.get(source_lang, SECTION_TITLES["en"])
+
+
 def render_card(
     word: str,
     pronunciation: str,
@@ -290,6 +315,8 @@ def render_card(
     darkmode: bool = False,
     width: int = WIDTH_DEFAULT,
     height: int = HEIGHT_DEFAULT,
+    font_path: str | None = None,
+    section_titles: dict[str, str] | None = None,
 ) -> None:
     if not definition.strip():
         raise ValueError("definition is required")
@@ -305,17 +332,39 @@ def render_card(
     def s(base):
         return max(8, int(round(base * scale)))
 
+    titles = section_titles or SECTION_TITLES["en"]
+
     img = Image.new("1", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
-    # Fonts (scaled to canvas size)
-    word_font = find_font("serif", s(56), bold=False)
-    ipa_font = find_font("serif", s(22), italic=True)
-    title_font = find_font("sans", s(20), bold=True)
-    body_font = find_font("sans", s(26))
-    body_italic_font = find_font("sans", s(26), italic=True)
-    small_font = find_font("sans", s(14))
-    number_font = find_font("serif", s(22), italic=True)
+    # Fonts (scaled to canvas size). If the caller pinned a specific font
+    # path, all roles use it (no separate bold/italic faces). Otherwise we
+    # fall back to the curated candidates.
+    if font_path and Path(font_path).exists():
+        try:
+            word_font = ImageFont.truetype(font_path, s(56))
+            ipa_font = ImageFont.truetype(font_path, s(22))
+            title_font = ImageFont.truetype(font_path, s(20))
+            body_font = ImageFont.truetype(font_path, s(26))
+            body_italic_font = ImageFont.truetype(font_path, s(26))
+            small_font = ImageFont.truetype(font_path, s(14))
+            number_font = ImageFont.truetype(font_path, s(22))
+        except Exception:
+            word_font = find_font("serif", s(56), bold=False)
+            ipa_font = find_font("serif", s(22), italic=True)
+            title_font = find_font("sans", s(20), bold=True)
+            body_font = find_font("sans", s(26))
+            body_italic_font = find_font("sans", s(26), italic=True)
+            small_font = find_font("sans", s(14))
+            number_font = find_font("serif", s(22), italic=True)
+    else:
+        word_font = find_font("serif", s(56), bold=False)
+        ipa_font = find_font("serif", s(22), italic=True)
+        title_font = find_font("sans", s(20), bold=True)
+        body_font = find_font("sans", s(26))
+        body_italic_font = find_font("sans", s(26), italic=True)
+        small_font = find_font("sans", s(14))
+        number_font = find_font("serif", s(22), italic=True)
 
     # ----------- Outer card border (rounded rectangle) -----------
     card_rect = [OUTER_MARGIN, OUTER_MARGIN, width - OUTER_MARGIN - 1, height - OUTER_MARGIN - 1]
@@ -341,11 +390,14 @@ def render_card(
     ipa_text = format_pronunciation(pronunciation)
     if ipa_text:
         y = draw_section_title(
-            draw, "Pronunciation", title_font, y, inner_x_left, inner_x_right, fill=fg
+            draw, titles["pronunciation"], title_font, y, inner_x_left, inner_x_right, fill=fg
         )
         if measure(ipa_text, ipa_font)[0] > content_w:
             for size in [s(24), s(22), s(20)]:
-                candidate = find_font("serif", size, italic=True)
+                if font_path and Path(font_path).exists():
+                    candidate = ImageFont.truetype(font_path, size)
+                else:
+                    candidate = find_font("serif", size, italic=True)
                 if measure(ipa_text, candidate)[0] <= content_w:
                     ipa_font = candidate
                     break
@@ -354,7 +406,9 @@ def render_card(
         y += measure(ipa_text, ipa_font)[1] + s(28)
 
     # ----------- Definition -----------
-    y = draw_section_title(draw, "Definition", title_font, y, inner_x_left, inner_x_right, fill=fg)
+    y = draw_section_title(
+        draw, titles["definition"], title_font, y, inner_x_left, inner_x_right, fill=fg
+    )
     def_lines = truncate_lines(definition, body_font, content_w, max_lines=4)
     y = draw_body_lines(draw, def_lines, body_font, inner_x_left, y, content_w,
                         line_spacing=8, fill=fg)
@@ -362,7 +416,9 @@ def render_card(
 
     # ----------- Usage / Example -----------
     if example.strip():
-        y = draw_section_title(draw, "Usage", title_font, y, inner_x_left, inner_x_right, fill=fg)
+        y = draw_section_title(
+            draw, titles["usage"], title_font, y, inner_x_left, inner_x_right, fill=fg
+        )
         ex_lines = truncate_lines(example, body_font, content_w, max_lines=4)
         y = draw_body_lines(draw, ex_lines, body_font, inner_x_left, y, content_w,
                             line_spacing=8, fill=fg)
@@ -370,7 +426,9 @@ def render_card(
 
     # ----------- Synonyms (italic, dictionary style) -----------
     if synonyms.strip():
-        y = draw_section_title(draw, "Synonyms", title_font, y, inner_x_left, inner_x_right, fill=fg)
+        y = draw_section_title(
+            draw, titles["synonyms"], title_font, y, inner_x_left, inner_x_right, fill=fg
+        )
         syn_lines = truncate_lines(synonyms, body_italic_font, content_w, max_lines=4)
         y = draw_body_lines(draw, syn_lines, body_italic_font, inner_x_left, y, content_w,
                             line_spacing=8, fill=fg)

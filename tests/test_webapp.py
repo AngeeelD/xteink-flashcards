@@ -401,6 +401,17 @@ class DownloadTests(unittest.TestCase):
         self.assertGreaterEqual(meta["bmp_light_count"], 2)
 
 
+def _stub_bmp_render(**kwargs):
+    """Replace render_card with a function that writes a tiny placeholder BMP."""
+    from PIL import Image as _PILImage
+    output_path = kwargs["output_path"]
+    width = kwargs.get("width", 528)
+    height = kwargs.get("height", 792)
+    bg = 255 if not kwargs.get("darkmode") else 0
+    img = _PILImage.new("1", (width, height), bg)
+    img.save(output_path, format="BMP")
+
+
 class PreviewEndpointTests(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -443,6 +454,54 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(dark.status_code, 200)
         self.assertNotEqual(light_bytes, dark_bytes)
         self.assertEqual(len(list(webapp.PREVIEWS_DIR.glob("*.png"))), 2)
+
+    def test_preview_source_lang_drives_section_titles(self):
+        """Different source_lang payloads produce different fingerprints."""
+        client = webapp.app.test_client()
+        en = client.post(
+            "/preview", json={"source_lang": "en", "darkmode": False, "device": "x3"}
+        )
+        en_bytes = en.get_data()
+        en.close()
+        es = client.post(
+            "/preview", json={"source_lang": "es", "darkmode": False, "device": "x3"}
+        )
+        es_bytes = es.get_data()
+        es.close()
+        self.assertEqual(en.status_code, 200)
+        self.assertEqual(es.status_code, 200)
+        self.assertNotEqual(en_bytes, es_bytes)
+        self.assertEqual(len(list(webapp.PREVIEWS_DIR.glob("*.png"))), 2)
+
+    def test_preview_records_app_version_in_footer(self):
+        """render_card receives the APP_VERSION in book_name for the footer."""
+        client = webapp.app.test_client()
+        with patch.object(
+            webapp, "render_card", side_effect=_stub_bmp_render
+        ) as render_card:
+            response = client.post(
+                "/preview", json={"darkmode": False, "device": "x3"}
+            )
+            response.close()
+        self.assertEqual(response.status_code, 200)
+        render_card.assert_called_once()
+        book_name = render_card.call_args.kwargs["book_name"]
+        self.assertIn(webapp.APP_VERSION, book_name)
+
+    def test_preview_passes_font_path_through(self):
+        client = webapp.app.test_client()
+        with patch.object(
+            webapp, "render_card", side_effect=_stub_bmp_render
+        ) as render_card:
+            response = client.post(
+                "/preview",
+                json={"darkmode": False, "device": "x3", "font": "/tmp/foo.ttf"},
+            )
+            response.close()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            render_card.call_args.kwargs["font_path"], "/tmp/foo.ttf"
+        )
 
 
 if __name__ == "__main__":

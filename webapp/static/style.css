@@ -331,8 +331,13 @@ article .phase {
   padding: var(--s-3);
   border: var(--bw) solid var(--c-border);
   border-radius: var(--radius-sm);
-  background: var(--c-text);
+  background: var(--c-surface);
   text-align: center;
+  transition: background 120ms ease-out;
+}
+
+.preview.preview-dark {
+  background: var(--c-text);
 }
 
 .preview img {
@@ -340,7 +345,6 @@ article .phase {
   height: auto;
   display: block;
   margin: 0 auto;
-  /* Invert image colors when the body gets a `preview-dark` class — JS sets it. */
   transition: filter 120ms ease-out;
 }
 
@@ -349,8 +353,12 @@ article .phase {
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: var(--c-surface);
+  color: var(--c-muted);
   margin-top: var(--s-2);
+}
+
+.preview.preview-dark figcaption {
+  color: var(--c-surface);
 }
 
 /* ---------- Status indicators ---------- */

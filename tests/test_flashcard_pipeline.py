@@ -155,6 +155,68 @@ class BmpRenderingTests(unittest.TestCase):
             "/tɛkˈnɑ.lə.dʒi/  /tɛkˈnɒl.ə.dʒi/  …",
         )
 
+    def test_section_titles_for_returns_expected_language(self):
+        self.assertEqual(bmp.section_titles_for("en")["definition"], "Definition")
+        self.assertEqual(bmp.section_titles_for("es")["definition"], "Definición")
+        # Unknown language falls back to English.
+        self.assertEqual(bmp.section_titles_for("xx")["definition"], "Definition")
+        self.assertEqual(bmp.section_titles_for(None)["definition"], "Definition")
+
+    def test_render_card_uses_localized_section_titles(self):
+        headings = []
+        original = bmp.draw_section_title
+
+        def record_heading(draw, text, font, y, x_left, x_right, fill=0):
+            headings.append(text)
+            return original(draw, text, font, y, x_left, x_right, fill)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "card.bmp"
+            with patch.object(bmp, "find_font", return_value=ImageFont.load_default()), patch.object(
+                bmp, "draw_section_title", side_effect=record_heading
+            ):
+                bmp.render_card(
+                    word="refactorización",
+                    pronunciation="ri-fak-to-ri-za-SION",
+                    definition="sustantivo. proceso en el que se refactoriza código",
+                    example="Mejoramos el diseño mediante una refactorización cuidadosa.",
+                    synonyms="reestructuración / limpieza",
+                    book_name="El Libro del Caballero",
+                    page_no=1,
+                    total_pages=1,
+                    output_path=output,
+                    section_titles=bmp.section_titles_for("es"),
+                )
+
+        self.assertEqual(
+            headings,
+            ["Pronunciación", "Definición", "Uso", "Sinónimos"],
+        )
+
+    def test_render_card_accepts_font_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fonts_dir = Path(tmpdir)
+            ttf_path = fonts_dir / "Custom.ttf"
+            ttf_path.write_bytes(b"\x00\x01\x00\x00")
+
+            output = fonts_dir / "card.bmp"
+            with patch.object(
+                bmp.ImageFont, "truetype", return_value=bmp.ImageFont.load_default()
+            ) as truetype:
+                bmp.render_card(
+                    word="refactoring",
+                    pronunciation="",
+                    definition="noun. process in which code is refactored",
+                    example="",
+                    synonyms="",
+                    book_name="Book",
+                    output_path=output,
+                    font_path=str(ttf_path),
+                )
+
+        called_paths = [call.args[0] for call in truetype.call_args_list]
+        self.assertTrue(all(str(ttf_path) == str(p) for p in called_paths))
+
     def test_section_heading_does_not_draw_a_divider(self):
         class DrawRecorder:
             def __init__(self):
