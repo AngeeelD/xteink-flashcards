@@ -193,10 +193,7 @@ class BmpRenderingTests(unittest.TestCase):
             ["Pronunciación", "Definición", "Uso", "Sinónimos"],
         )
 
-    def test_font_path_overrides_only_the_word_role(self):
-        """When font_path is set, only the word role uses it. The italic /
-        sans / body roles keep the curated candidates so the card retains
-        IPA coverage and visual hierarchy."""
+    def test_render_card_accepts_font_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fonts_dir = Path(tmpdir)
             ttf_path = fonts_dir / "Custom.ttf"
@@ -217,48 +214,8 @@ class BmpRenderingTests(unittest.TestCase):
                     font_path=str(ttf_path),
                 )
 
-        called_paths = [str(p) for p in (call.args[0] for call in truetype.call_args_list)]
-        # Exactly one call should use the user-supplied font (the word role).
-        word_overrides = [p for p in called_paths if p == str(ttf_path)]
-        self.assertEqual(
-            len(word_overrides), 1,
-            f"expected exactly one ImageFont.truetype call to use the override, "
-            f"got {len(word_overrides)}: {word_overrides}",
-        )
-        # The remaining calls go through find_font and should not match the
-        # override path (they fall back to FONT_CANDIDATES).
-        curated_calls = [p for p in called_paths if p != str(ttf_path)]
-        self.assertGreaterEqual(
-            len(curated_calls), 6,
-            "expected the italic / sans / body roles to fall back to find_font",
-        )
-
-    def test_font_path_does_not_affect_ipa_shrink_loop(self):
-        """The IPA shrink-to-fit fallback uses the curated italic regardless
-        of the user's font_path choice (so phonetic glyphs stay covered)."""
-        fonts_dir = Path(tempfile.mkdtemp())
-        try:
-            ttf_path = fonts_dir / "Custom.ttf"
-            ttf_path.write_bytes(b"\x00\x01\x00\x00")
-            output = fonts_dir / "card.bmp"
-
-            with patch.object(
-                bmp, "find_font",
-                return_value=bmp.ImageFont.load_default(),
-            ):
-                bmp.render_card(
-                    word="refactoring",
-                    pronunciation="a" * 200,  # forces the shrink loop
-                    definition="noun. process in which code is refactored",
-                    example="",
-                    synonyms="",
-                    book_name="Book",
-                    output_path=output,
-                    font_path=str(ttf_path),
-                )
-        finally:
-            import shutil
-            shutil.rmtree(fonts_dir, ignore_errors=True)
+        called_paths = [call.args[0] for call in truetype.call_args_list]
+        self.assertTrue(all(str(ttf_path) == str(p) for p in called_paths))
 
     def test_section_heading_does_not_draw_a_divider(self):
         class DrawRecorder:
