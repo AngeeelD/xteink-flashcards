@@ -265,9 +265,22 @@
   syncDeviceFrame();
   setTimeout(refreshPreview, 100);
 
-  // ---- Submit-button protection -----------------------------------------
+  // ---- Submit-button gating --------------------------------------------
+  // The button is disabled when no output is selected — there's nothing to
+  // generate, so the action is removed from the available affordances.
   const form = document.getElementById('upload-form');
   const btn = document.getElementById('submit-btn');
+  const csvEnabled = document.getElementById('csv_enabled');
+
+  function syncSubmitButton() {
+    if (!btn) return;
+    const anyOutput = (csvEnabled && csvEnabled.checked) || bmpEnabled.checked;
+    btn.disabled = !anyOutput;
+  }
+  csvEnabled.addEventListener('change', syncSubmitButton);
+  bmpEnabled.addEventListener('change', syncSubmitButton);
+  syncSubmitButton();
+
   if (form && btn) {
     let submitted = false;
     form.addEventListener('submit', () => {
