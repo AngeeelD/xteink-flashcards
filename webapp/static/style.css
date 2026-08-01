@@ -169,8 +169,17 @@ select:focus-visible {
   margin: 0;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 720px) {
   .grid { grid-template-columns: 1fr; }
+}
+
+/* Grid for screensaver settings: 3 columns on desktop, 1 on mobile. */
+.grid-bmp {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+@media (max-width: 720px) {
+  .grid-bmp { grid-template-columns: 1fr; }
 }
 
 /* ---------- Buttons ---------- */
@@ -258,6 +267,90 @@ article .phase {
   color: var(--c-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+/* ---------- Compatibility banner ---------- */
+.compat-banner {
+  font-family: var(--f-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: var(--bw) solid var(--c-border);
+  border-left: 6px solid var(--c-primary);
+  border-radius: var(--radius-sm);
+  padding: var(--s-3) var(--s-4);
+  margin: 0 0 var(--s-5) 0;
+}
+
+.compat-banner a {
+  color: var(--c-text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------- Footer ---------- */
+.site-footer {
+  margin-top: var(--s-6);
+  padding-top: var(--s-4);
+  border-top: var(--bw) solid var(--c-border);
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--c-muted);
+  text-align: center;
+}
+
+.site-footer a {
+  color: var(--c-muted);
+}
+
+/* ---------- Checkbox rows (settings blocks) ---------- */
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+}
+
+.checkbox-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* ---------- Live preview ---------- */
+.preview {
+  margin: var(--s-5) 0 0 0;
+  padding: var(--s-3);
+  border: var(--bw) solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-text);
+  text-align: center;
+}
+
+.preview img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  /* Invert image colors when the body gets a `preview-dark` class — JS sets it. */
+  transition: filter 120ms ease-out;
+}
+
+.preview figcaption {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--c-surface);
+  margin-top: var(--s-2);
 }
 
 /* ---------- Status indicators ---------- */

@@ -115,13 +115,20 @@ http://<macmini-name-or-ip>:5000
 
 ### Two outputs, your choice
 
-The form lets you check one, both, or neither of:
+The form lets you enable one, both, or neither of:
 
-- `flashcards.zip` — bilingual flashcards (English|Spanish)
-- `screensaver.zip` — BMPs ready to drop on the Xteink as images
+- **Flashcards** — bilingual CSVs per chapter. Source / target / items / chapter
+  range are independent from the screensaver settings.
+- **Screensaver** — BMPs at the device's native resolution, rendered through the
+  same `render_card` pipeline shown in the live preview. Source language, items,
+  chapter range, font, dark mode and `with-examples` are independent from the
+  flashcards settings. When dark mode is on, the job produces **only**
+  `screensaver_dark.zip` (the light pass is suppressed).
 
-Both can be generated in the same job if you check both boxes. You can also
-restrict to a chapter range (`Start chapter` / `End chapter`) for quick tests.
+Each output runs in the same job and reuses the chapter-detection step, but
+its settings are independent. The dark mode toggle is **exclusive** — toggling
+it on guarantees that no light ZIP is created, even if the user has both
+outputs enabled.
 
 ---
 
@@ -178,6 +185,16 @@ phase + per-chapter progress.
   licensed under **CC BY-SA 4.0**. Attribution is preserved in each `.ifo` file.
 - The **Python code** (scripts, webapp, Docker setup, docs) is released under the
   [MIT License](./LICENSE).
+
+## Compatibility
+
+This tool is designed for and tested against [**cpr-vcodex**](https://github.com/franssjz/cpr-vcodex),
+the open firmware that ships the `/flashcards/` and screensaver features on Xteink
+X3 and X4 readers. Other Xteink firmwares may render the BMPs differently — for
+example, the screensaver may ignore the file naming convention or expect a
+different BMP header. If you are running stock firmware, check the
+[cpr-vcodex README](https://github.com/franssjz/cpr-vcodex) before generating
+cards so you know what to expect on-device.
 
 ## License
 

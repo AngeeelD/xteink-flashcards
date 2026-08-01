@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 
+<aside class="compat-banner" aria-label="Compatibility notice">
+  Designed for <a href="https://github.com/franssjz/cpr-vcodex" rel="noopener" target="_blank">cpr-vcodex</a>.
+  Other Xteink firmware may render BMPs differently.
+</aside>
+
 <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
 
   <fieldset>
@@ -10,68 +15,107 @@
   </fieldset>
 
   <fieldset>
-    <legend>Languages & cadence</legend>
+    <legend>Outputs</legend>
+    <label>
+      <input type="checkbox" id="csv_enabled" name="csv_enabled" checked>
+      <strong>Flashcards</strong> — bilingual CSVs (per chapter)
+    </label>
+    <label>
+      <input type="checkbox" id="bmp_enabled" name="bmp_enabled" checked>
+      <strong>Screensaver</strong> — BMPs at the chosen device's resolution
+    </label>
+  </fieldset>
+
+  <fieldset id="csv-settings" data-conditional="csv_enabled">
+    <legend>Flashcards settings</legend>
     <div class="grid">
       <div>
-        <label for="source">Source language</label>
-        <select id="source" name="source">
+        <label for="csv_source">Source language</label>
+        <select id="csv_source" name="csv_source">
           <option value="en" selected>English</option>
           <option value="es">Spanish</option>
         </select>
       </div>
       <div>
-        <label for="target">Target language</label>
-        <select id="target" name="target">
+        <label for="csv_target">Target language</label>
+        <select id="csv_target" name="csv_target">
           <option value="es" selected>Spanish</option>
           <option value="en">English</option>
         </select>
       </div>
       <div>
-        <label for="items">Words per chapter</label>
-        <input type="number" id="items" name="items" value="30" min="5" max="100">
+        <label for="csv_items">Items per chapter</label>
+        <input type="number" id="csv_items" name="csv_items" value="30" min="5" max="100">
       </div>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="csv_start">Start chapter</label>
+        <input type="number" id="csv_start" name="csv_start" placeholder="1" min="1">
+      </div>
+      <div>
+        <label for="csv_end">End chapter</label>
+        <input type="number" id="csv_end" name="csv_end" placeholder="last" min="1">
+      </div>
+      <div></div>
     </div>
   </fieldset>
 
-  <fieldset>
-    <legend>Chapter range (optional)</legend>
-    <div class="grid">
+  <fieldset id="bmp-settings" data-conditional="bmp_enabled">
+    <legend>Screensaver settings</legend>
+    <div class="grid grid-bmp">
       <div>
-        <label for="start">Start chapter</label>
-        <input type="number" id="start" name="start" placeholder="1" min="1">
+        <label for="bmp_source">Source language</label>
+        <select id="bmp_source" name="bmp_source">
+          <option value="en" selected>English</option>
+          <option value="es">Spanish</option>
+        </select>
       </div>
       <div>
-        <label for="end">End chapter</label>
-        <input type="number" id="end" name="end" placeholder="last" min="1">
+        <label for="bmp_items">Items per chapter</label>
+        <input type="number" id="bmp_items" name="bmp_items" value="30" min="5" max="100">
       </div>
       <div>
-        <label for="device">E-reader</label>
-        <select id="device" name="device">
-          <option value="x3" selected>Xteink X3 &nbsp;·&nbsp; 528 × 792</option>
-          <option value="x4">Xteink X4 &nbsp;·&nbsp; 480 × 800</option>
+        <label for="bmp_device">E-reader</label>
+        <select id="bmp_device" name="bmp_device">
+          <option value="x3" selected>Xteink X3 · 528 × 792</option>
+          <option value="x4">Xteink X4 · 480 × 800</option>
         </select>
       </div>
     </div>
-  </fieldset>
-
-  <fieldset>
-    <legend>Outputs</legend>
-    <label>
-      <input type="checkbox" id="generate_csv" name="generate_csv" checked>
-      <strong>flashcards.zip</strong> — bilingual CSVs (English | Spanish)
-    </label>
-    <label>
-      <input type="checkbox" id="generate_bmp" name="generate_bmp" checked>
-      <strong>screensaver.zip</strong> — BMPs at the chosen device's resolution
-    </label>
-    <label>
-      <input type="checkbox" id="darkmode" name="darkmode">
-      Dark-mode variant (black background, white text)
-    </label>
-    <label>
-      <input type="checkbox" id="with_examples" name="with_examples">
-      Include usage examples in BMPs (slower; one extra LLM call per chapter)
-    </label>
+    <div class="grid grid-bmp">
+      <div>
+        <label for="bmp_start">Start chapter</label>
+        <input type="number" id="bmp_start" name="bmp_start" placeholder="1" min="1">
+      </div>
+      <div>
+        <label for="bmp_end">End chapter</label>
+        <input type="number" id="bmp_end" name="bmp_end" placeholder="last" min="1">
+      </div>
+      <div>
+        <label for="bmp_font">Font</label>
+        <select id="bmp_font" name="bmp_font">
+          <option value="">— first available —</option>
+          {% for font in fonts %}
+            <option value="{{ font.path }}">{{ font.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="checkbox-row">
+      <label>
+        <input type="checkbox" id="bmp_with_examples" name="bmp_with_examples">
+        Include usage examples (slower; one extra LLM call per chapter)
+      </label>
+      <label>
+        <input type="checkbox" id="bmp_dark" name="bmp_dark">
+        Dark mode (exclusive: delivers only screensaver_dark.zip)
+      </label>
+    </div>
+    <figure class="preview">
+      <img id="preview-img" src="" alt="Live preview of the selected screensaver card" />
+      <figcaption>Live preview · updates as you change settings</figcaption>
+    </figure>
   </fieldset>
 
   <button type="submit" id="submit-btn">Generate flashcards</button>
@@ -104,9 +148,75 @@
 {% endif %}
 
 <script>
-  // Disable button only after the browser has already started the submission.
-  // Use the form's `submit` event (not button `click`) so this works even if
-  // JS is slow, the user double-clicks, or a browser extension delays.
+  // ---- Live preview wiring ----------------------------------------------
+  // The preview reflects the *screensaver* settings only. It uses the same
+  // render_card pipeline as real jobs so what the user sees matches what
+  // they'll get.
+  const previewImg = document.getElementById('preview-img');
+  const bmpEnabled = document.getElementById('bmp_enabled');
+  const bmpDark = document.getElementById('bmp_dark');
+  const bmpWithExamples = document.getElementById('bmp_with_examples');
+  const bmpDevice = document.getElementById('bmp_device');
+  const bmpFont = document.getElementById('bmp_font');
+
+  function collectPreviewPayload() {
+    return {
+      darkmode: bmpDark.checked,
+      with_examples: bmpWithExamples.checked,
+      device: bmpDevice.value,
+      font: bmpFont.value,
+    };
+  }
+
+  let previewTimer = null;
+  function refreshPreview() {
+    if (!bmpEnabled.checked) {
+      previewImg.removeAttribute('src');
+      previewImg.alt = 'Enable the screensaver output to see a live preview.';
+      return;
+    }
+    const payload = collectPreviewPayload();
+    const body = JSON.stringify(payload);
+    // Cache-bust via a timestamp so the browser always re-fetches.
+    const url = '/preview?t=' + Date.now();
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      cache: 'no-store',
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error('preview failed');
+        return r.blob();
+      })
+      .then((blob) => {
+        const oldUrl = previewImg.src;
+        previewImg.src = URL.createObjectURL(blob);
+        if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
+      })
+      .catch(() => {
+        // Silently keep the previous preview on transient failures.
+      });
+  }
+
+  function debouncedRefresh() {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(refreshPreview, 250);
+  }
+
+  // Trigger a refresh on any input change inside the screensaver settings.
+  ['change', 'input'].forEach((evt) => {
+    document
+      .getElementById('bmp-settings')
+      .addEventListener(evt, debouncedRefresh);
+  });
+  // Re-evaluate when the user toggles the screensaver output itself.
+  bmpEnabled.addEventListener('change', refreshPreview);
+
+  // First paint: fetch once after a short delay so the page is interactive.
+  setTimeout(refreshPreview, 100);
+
+  // ---- Submit-button protection -----------------------------------------
   const form = document.getElementById('upload-form');
   const btn = document.getElementById('submit-btn');
   if (form && btn) {
@@ -116,12 +226,8 @@
       btn.disabled = true;
       btn.textContent = 'Uploading…';
     });
-    // Safety: if the form never actually submits (validation, network error),
-    // re-enable the button after a few seconds so the user can try again.
     setTimeout(() => {
-      if (!submitted) {
-        btn.disabled = false;
-      }
+      if (!submitted) btn.disabled = false;
     }, 8000);
   }
 </script>
