@@ -17,6 +17,9 @@
   --c-text: #1B1B1B;
   --c-muted: #6B6B6B;
   --c-border: #1B1B1B;
+  /* Pure white for the device bezel — distinct from the page surface so the
+   * Xteink frame reads as plastic, not paper. */
+  --c-device: #FFFFFF;
 
   /* Spacing scale (4/8/12/16/24/32) */
   --s-1: 4px;
@@ -333,7 +336,7 @@ article .phase {
 .device-frame {
   margin: var(--s-5) auto 0 auto;
   padding: 14px 16px 28px 16px;
-  background: var(--c-surface);
+  background: var(--c-device);
   border: 2px solid var(--c-border);
   border-radius: 20px;
   box-shadow: var(--shadow-hard);
@@ -353,10 +356,10 @@ article .phase {
 }
 
 .device-screen {
-  background: var(--c-surface);
+  background: var(--c-device);
   border: var(--bw) solid var(--c-border);
   border-radius: 4px;
-  box-shadow: inset 0 0 0 2px var(--c-surface), inset 0 0 0 3px var(--c-border);
+  box-shadow: inset 0 0 0 2px var(--c-device), inset 0 0 0 3px var(--c-border);
   width: 240px;
   /* X4 default: 480:800 */
   height: calc(240px * 800 / 480);
@@ -387,28 +390,31 @@ article .phase {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 18px auto 0 auto;
-  width: 70%;
-  max-width: 180px;
+  margin: 22px auto 0 auto;
+  width: 78%;
+  max-width: 210px;
 }
 
 .device-btn {
   display: inline-block;
-  background: var(--c-surface);
+  background: var(--c-device);
   border: 1.5px solid var(--c-border);
   cursor: default;
+  /* Subtle inset shadow so the buttons read as physical, recessed keys. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.04);
 }
 
-.device-btn-round {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-}
-
-.device-btn-pill {
+.device-btn-pill-left {
   width: 90px;
-  height: 14px;
-  border-radius: 7px;
+  height: 16px;
+  border-radius: 8px;
+}
+
+.device-btn-pill-right {
+  width: 110px;
+  height: 16px;
+  border-radius: 8px;
 }
 
 .preview-caption {
