@@ -314,18 +314,18 @@ def draw_body_lines(draw, lines: list[str], font, x: int, y: int,
 
 # ----------------------------- Card rendering -----------------------------
 
-def format_pronunciation(pronunciation: str) -> str:
+def format_pronunciation(pronunciation: str, max_variants: int = 3) -> str:
     """Render IPA pronunciations one per line.
 
     Each variant is wrapped in slashes (e.g. ``/kæt/``) and joined with
     newlines so render_card can draw them on separate rows. Empty parts
-    are dropped. No truncation marker — every pronunciation StarDict /
-    Ollama provides is rendered verbatim, since the `…` suffix in the
-    previous version read like an extra (non-existent) pronunciation.
+    are dropped. Capped at ``max_variants`` (default 3) so a word with
+    seven StarDict pronunciations doesn't push the rest of the card into
+    the footer — the remaining variants are silently dropped.
     """
     variants = [part.strip().strip("/") for part in pronunciation.split(" / ")]
     variants = [part for part in variants if part]
-    return "\n".join(f"/{part}/" for part in variants)
+    return "\n".join(f"/{part}/" for part in variants[:max_variants])
 
 
 def ensure_terminator(text: str, terminator: str = ".") -> str:
