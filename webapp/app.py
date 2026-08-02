@@ -797,6 +797,28 @@ def _safe_font_filename(filename: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "custom.ttf"
 
 
+def _delete_job(job_id: str) -> bool:
+    """Remove a completed (or stuck) job from disk.
+
+    Recursively removes the job directory and everything under it
+    (bmp/, bmp_dark/, enriched/, csv/, the zips and meta.json). If
+    the deleted job happens to be the currently active one, clears
+    ``_active_job_id`` under the job lock so the next upload can take
+    over. Returns True if a directory was removed, False if the id
+    didn't exist.
+    """
+    import shutil
+    job_dir = JOBS_DIR / job_id
+    if not job_dir.is_dir():
+        return False
+    shutil.rmtree(job_dir)
+    global _active_job_id
+    with _job_lock:
+        if _active_job_id == job_id:
+            _active_job_id = None
+    return True
+
+
 def _recent_jobs(limit: int = 6) -> list[dict]:
     """List recent completed jobs for the history strip on the landing page.
 
@@ -912,6 +934,19 @@ def upload():
            request.args.get("format") == "json":
             return jsonify({"job_id": job_id, "redirect": url_for("job", job_id=job_id)})
         return _redirect(url_for("job", job_id=job_id))
+
+
+@app.route("/job/<job_id>/delete", methods=["POST"])
+def delete_job(job_id):
+    """Remove a completed job and all of its outputs from disk.
+
+    The button on the recent-jobs carousel posts here after a
+    JavaScript confirm() dialog. Returns 204 on success, 404 if the
+    job id doesn't exist.
+    """
+    if not _delete_job(job_id):
+        abort(404)
+    return ("", 204)
 
 
 @app.route("/job/<job_id>")

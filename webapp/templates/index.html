@@ -168,24 +168,31 @@
   <h2>Recent jobs</h2>
   <div class="recent-jobs-strip">
     {% for job in recent_jobs %}
-    <a href="/job/{{ job.id }}" class="recent-job-card">
-      <div class="recent-job-thumb">
-        {% if job.thumbnail %}
-          <img src="/job/{{ job.id }}/thumbnail.png"
-               alt="First card of {{ job.book_name }}"
-               loading="lazy">
-        {% else %}
-          <span class="recent-job-thumb-fallback">no preview</span>
-        {% endif %}
-      </div>
-      <div class="recent-job-meta">
-        <p class="recent-job-name" title="{{ job.book_name }}">{{ job.book_name }}</p>
-        <p class="recent-job-date">{{ job.finished_at | relative_time }}</p>
-        <p class="recent-job-stats">
-          {{ job.flashcards_count }} cards · {{ job.bmp_count }} bmps
-        </p>
-      </div>
-    </a>
+    <div class="recent-job-wrapper">
+      <a href="/job/{{ job.id }}" class="recent-job-card">
+        <div class="recent-job-thumb">
+          {% if job.thumbnail %}
+            <img src="/job/{{ job.id }}/thumbnail.png"
+                 alt="First card of {{ job.book_name }}"
+                 loading="lazy">
+          {% else %}
+            <span class="recent-job-thumb-fallback">no preview</span>
+          {% endif %}
+        </div>
+        <div class="recent-job-meta">
+          <p class="recent-job-name" title="{{ job.book_name }}">{{ job.book_name }}</p>
+          <p class="recent-job-date">{{ job.finished_at | relative_time }}</p>
+          <p class="recent-job-stats">
+            {{ job.flashcards_count }} cards · {{ job.bmp_count }} bmps
+          </p>
+        </div>
+      </a>
+      <button type="button"
+              class="recent-job-delete"
+              data-job-id="{{ job.id }}"
+              data-book-name="{{ job.book_name }}"
+              aria-label="Delete {{ job.book_name }}">×</button>
+    </div>
     {% endfor %}
   </div>
 </section>
@@ -380,6 +387,41 @@
 
   syncDeviceFrame();
   setTimeout(refreshPreview, 100);
+
+  // ---- Recent job deletion ------------------------------------------------
+  // Each card in the carousel carries a small × button. Clicking it pops
+  // a confirm() dialog and, on accept, posts to /job/<id>/delete. On
+  // success the card wrapper is removed from the DOM. If the strip ends
+  // up empty, the whole section is hidden too so we don't show a
+  // heading over an empty list.
+  document.querySelectorAll('.recent-job-delete').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const jobId = btn.dataset.jobId;
+      const bookName = btn.dataset.bookName;
+      if (!confirm(
+        `Delete "${bookName}"? This removes the flashcard zip, ` +
+        `screensaver zip(s) and all BMPs. The job will be gone for good.`
+      )) {
+        return;
+      }
+      fetch(`/job/${encodeURIComponent(jobId)}/delete`, { method: 'POST' })
+        .then((r) => {
+          if (r.status === 404) throw new Error('job not found on server');
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const wrapper = btn.closest('.recent-job-wrapper');
+          if (wrapper) wrapper.remove();
+          // If the strip is empty now, hide the whole section.
+          const strip = document.querySelector('.recent-jobs-strip');
+          if (strip && strip.children.length === 0) {
+            const section = strip.closest('.recent-jobs');
+            if (section) section.remove();
+          }
+        })
+        .catch((err) => {
+          alert(`Delete failed: ${err.message}`);
+        });
+    });
+  });
 
   // ---- Submit-button gating --------------------------------------------
   // The button is disabled when no output is selected — there's nothing to

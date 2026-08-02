@@ -876,6 +876,98 @@ class RecentJobsTests(unittest.TestCase):
         self.assertIn('href="/job/abc123"', html)
         self.assertIn("class=\"job-link\"", html)
 
+    def test_index_route_renders_delete_button_per_recent_job(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        self._make_job("alpha",
+                       finished_at=(now - timedelta(hours=1)).isoformat(),
+                       original_filename="alpha-book.epub")
+
+        with patch.object(webapp, "_active_job_id", None), \
+             patch.object(webapp, "_resolve_default_font", return_value=None), \
+             patch.object(webapp, "list_available_fonts", return_value=[]):
+            response = webapp.app.test_client().get("/")
+            html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        # Delete button exists with the job id wired up for the JS handler.
+        self.assertIn('class="recent-job-delete"', html)
+        self.assertIn('data-job-id="alpha"', html)
+        self.assertIn('Delete alpha-book.epub', html)
+
+
+class DeleteJobTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._jobs_dir = Path(self._tmpdir.name) / "jobs"
+        self._jobs_dir.mkdir()
+        self._patch = patch.object(webapp, "JOBS_DIR", self._jobs_dir)
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        self._tmpdir.cleanup()
+
+    def _make_job_with_outputs(self, job_id):
+        job_dir = self._jobs_dir / job_id
+        job_dir.mkdir()
+        (job_dir / "meta.json").write_text(json.dumps({
+            "id": job_id,
+            "status": "done",
+            "original_filename": "book.epub",
+            "flashcards_count": 3,
+            "bmp_count": 5,
+        }))
+        for sub in ("bmp", "bmp_dark", "enriched", "csv"):
+            d = job_dir / sub
+            d.mkdir()
+            (d / "placeholder.txt").write_bytes(b"data")
+        (job_dir / "flashcards.zip").write_bytes(b"zip")
+        (job_dir / "screensaver.zip").write_bytes(b"zip")
+        (job_dir / "screensaver_dark.zip").write_bytes(b"zip")
+        return job_dir
+
+    def test_delete_job_removes_directory_and_all_outputs(self):
+        job_dir = self._make_job_with_outputs("alpha")
+        self.assertTrue(job_dir.exists())
+
+        with webapp.app.test_client() as client:
+            response = client.post("/job/alpha/delete")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(job_dir.exists())
+        # None of the inner dirs survive.
+        for sub in ("bmp", "bmp_dark", "enriched", "csv"):
+            self.assertFalse((job_dir / sub).exists())
+
+    def test_delete_job_returns_404_for_missing_job(self):
+        with webapp.app.test_client() as client:
+            response = client.post("/job/does-not-exist/delete")
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_job_clears_active_job_id_if_match(self):
+        from threading import Lock
+        self._make_job_with_outputs("current")
+        # Pretend the deleted job is the active one.
+        webapp._active_job_id = "current"
+        with webapp.app.test_client() as client:
+            response = client.post("/job/current/delete")
+        self.assertEqual(response.status_code, 204)
+        # The active id is cleared under the job lock.
+        self.assertIsNone(webapp._active_job_id)
+
+    def test_delete_job_does_not_touch_other_jobs(self):
+        keep = self._make_job_with_outputs("keep-me")
+        gone = self._make_job_with_outputs("remove-me")
+
+        with webapp.app.test_client() as client:
+            client.post("/job/remove-me/delete")
+
+        self.assertFalse(gone.exists())
+        self.assertTrue(keep.exists())
+        # Sanity-check that the kept job's contents survived.
+        self.assertTrue((keep / "meta.json").exists())
+        self.assertTrue((keep / "bmp" / "placeholder.txt").exists())
+
 
 class PreviewEndpointTests(unittest.TestCase):
     def setUp(self):

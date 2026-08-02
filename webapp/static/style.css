@@ -406,9 +406,13 @@ article > header a.job-link:hover {
   border-radius: 3px;
 }
 
-.recent-job-card {
+.recent-job-wrapper {
   flex: 0 0 160px;
   scroll-snap-align: start;
+  position: relative;
+}
+
+.recent-job-card {
   display: block;
   text-decoration: none;
   color: var(--c-text);
@@ -422,6 +426,42 @@ article > header a.job-link:hover {
 .recent-job-card:hover {
   transform: translate(-2px, -2px);
   box-shadow: 4px 4px 0 0 var(--c-text);
+}
+
+.recent-job-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-family: var(--f-mono);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: var(--bw) solid var(--c-border);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 100ms ease-out, background 100ms ease-out,
+              color 100ms ease-out, border-color 100ms ease-out;
+  z-index: 2;
+}
+
+.recent-job-wrapper:hover .recent-job-delete,
+.recent-job-delete:focus-visible {
+  opacity: 1;
+}
+
+.recent-job-delete:hover {
+  background: var(--c-danger);
+  color: var(--c-surface);
+  border-color: var(--c-danger);
 }
 
 .recent-job-thumb {
@@ -481,7 +521,7 @@ article > header a.job-link:hover {
 }
 
 @media (max-width: 480px) {
-  .recent-job-card {
+  .recent-job-wrapper {
     flex: 0 0 140px;
   }
   .recent-job-thumb {
