@@ -205,6 +205,37 @@ phase + per-chapter progress.
 - The StarDict files are small (~5 MB each) so we COPY them into the image
   instead of mounting — no need for bind mounts that drift out of sync.
 
+## Persisting uploaded fonts
+
+Uploaded fonts land in `webapp/fonts/` inside the container. That
+directory is created at startup and lives on the container's writable
+layer, so any font you upload is visible in the screensaver dropdown
+for as long as the container is running — days, weeks, whatever.
+
+As soon as the container is destroyed (`docker compose down`, a
+`docker compose up -d --build` that recreates the service, or a host
+reboot), that writable layer is gone and the uploaded fonts vanish.
+
+To survive restarts and rebuilds, mount a Docker volume on top of
+`webapp/fonts/` in your `docker-compose.yml`:
+
+```yaml
+services:
+  webapp:
+    # ... existing service config ...
+    volumes:
+      - webapp_fonts:/app/webapp/fonts
+
+volumes:
+  webapp_fonts:
+```
+
+With that mount in place, a `docker compose down && docker compose up -d`
+keeps every font you uploaded across restarts. Use a named volume
+(`webapp_fonts:`) for portability across hosts, or a bind mount
+(`./fonts-data:/app/webapp/fonts`) if you want the files visible on
+the host filesystem for backup.
+
 ## Data & licensing
 
 - The bundled **StarDict** dictionaries (`wikdict-en-es/`, `wikdict-es-en/`) come from

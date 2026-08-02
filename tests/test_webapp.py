@@ -618,6 +618,34 @@ class CustomFontTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("UserPick.otf (custom)", html)
 
+    def test_uploaded_font_persists_across_multiple_requests(self):
+        """Once a font is uploaded it must remain in the picker across
+        subsequent requests — this is the in-container persistence case
+        that the user expects ('upload, come back weeks later, font is
+        still there' while the container is up)."""
+        client = webapp.app.test_client()
+        data = {
+            "font": (io.BytesIO(b"\x00\x01\x00\x00" + b"x" * 100), "PersistSans.ttf"),
+        }
+        response = client.post("/upload-font", data=data,
+                               content_type="multipart/form-data")
+        response.close()
+        self.assertEqual(response.status_code, 200)
+
+        # Subsequent requests (simulating different sessions / reloads)
+        # should still list the uploaded font.
+        for _ in range(3):
+            with patch.object(webapp, "_active_job_id", None), \
+                 patch.object(webapp, "_resolve_default_font", return_value=None):
+                resp = client.get("/")
+                html = resp.get_data(as_text=True)
+                resp.close()
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("PersistSans.ttf (custom)", html)
+
+        # And the file is still on disk.
+        self.assertTrue((self._fonts_dir / "PersistSans.ttf").exists())
+
 
 class PreviewEndpointTests(unittest.TestCase):
     def setUp(self):
