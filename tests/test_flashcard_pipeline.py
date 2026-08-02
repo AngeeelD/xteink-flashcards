@@ -149,10 +149,38 @@ mystery,,empty translation
 
 
 class BmpRenderingTests(unittest.TestCase):
-    def test_formats_at_most_two_pronunciation_variants(self):
+    def test_format_pronunciation_joins_with_newlines(self):
+        """Each pronunciation variant ends up on its own line so the
+        renderer can draw them as separate rows."""
         self.assertEqual(
             bmp.format_pronunciation("tɛkˈnɑ.lə.dʒi / tɛkˈnɒl.ə.dʒi / third"),
-            "/tɛkˈnɑ.lə.dʒi/  /tɛkˈnɒl.ə.dʒi/  …",
+            "/tɛkˈnɑ.lə.dʒi/\n"
+            "/tɛkˈnɒl.ə.dʒi/\n"
+            "/third/",
+        )
+
+    def test_format_pronunciation_drops_empty_variants(self):
+        self.assertEqual(
+            bmp.format_pronunciation("/kæt/ / /kæts/"),
+            "/kæt/\n/kæts/",
+        )
+
+    def test_format_pronunciation_returns_empty_for_blank_input(self):
+        self.assertEqual(bmp.format_pronunciation(""), "")
+        self.assertEqual(bmp.format_pronunciation("   "), "")
+
+    def test_ensure_terminator_appends_period_when_missing(self):
+        self.assertEqual(bmp.ensure_terminator("hello"), "hello.")
+        self.assertEqual(bmp.ensure_terminator("hello."), "hello.")
+        self.assertEqual(bmp.ensure_terminator("hello!"), "hello!")
+        self.assertEqual(bmp.ensure_terminator("hello?"), "hello?")
+        self.assertEqual(bmp.ensure_terminator("hello…"), "hello…")
+        # ensure_terminator strips trailing whitespace only; leading stays.
+        self.assertEqual(bmp.ensure_terminator("hello  "), "hello.")
+        self.assertEqual(bmp.ensure_terminator(""), "")
+        self.assertEqual(
+            bmp.ensure_terminator("from a thought to a document"),
+            "from a thought to a document.",
         )
 
     def test_section_titles_for_returns_expected_language(self):

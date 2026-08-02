@@ -444,11 +444,18 @@ def _render_bmps_per_chapter(
     update_status,
     font_path: str | None = None,
     source_lang: str | None = None,
+    page_offset: int = 0,
+    book_total_pages: int = 0,
 ) -> tuple[int, int]:
     """Render light or dark BMPs from previously-enriched CSVs.
 
     Pure read-side: no Ollama, no StarDict. The caller is responsible for
     having populated `enriched_csv_outdir` via `_enrich_per_chapter`.
+
+    When `book_total_pages` is non-zero, the page counter in the card
+    footer is per-book (e.g. ``7 / 24`` for the seventh card of a
+    24-card book). When it's zero, the counter falls back to per-chapter
+    (``j + 1 / len(enriched)``) so legacy callers don't break.
     """
     bmp_outdir.mkdir(parents=True, exist_ok=True)
     enriched_paths = sorted(enriched_csv_outdir.glob("chapter_*.csv"))
@@ -482,6 +489,12 @@ def _render_bmps_per_chapter(
         for j, row in enumerate(enriched):
             slug = re.sub(r"[^a-z0-9]+", "_", row["word"].lower()).strip("_")[:30]
             bmp_path = bmp_outdir / f"chapter_{stem}_{j:03d}_{slug}.bmp"
+            if book_total_pages:
+                page_no = page_offset + j + 1
+                total_pages = book_total_pages
+            else:
+                page_no = j + 1
+                total_pages = len(enriched)
             render_card(
                 word=row["word"],
                 pronunciation=row.get("pronunciation", ""),
@@ -489,8 +502,8 @@ def _render_bmps_per_chapter(
                 example=row.get("example", ""),
                 synonyms=row.get("synonyms", ""),
                 book_name=row.get("book", book_name),
-                page_no=j + 1,
-                total_pages=len(enriched),
+                page_no=page_no,
+                total_pages=total_pages,
                 output_path=bmp_path,
                 darkmode=darkmode,
                 width=width,
@@ -499,6 +512,8 @@ def _render_bmps_per_chapter(
                 section_titles=titles,
             )
         written += len(enriched)
+        if book_total_pages:
+            page_offset += len(enriched)
 
     return written, total
 
@@ -604,6 +619,17 @@ def _run_job(job_id: str, config: dict) -> None:
                 update_status=update,
             )
 
+            # Compute book-level page totals so the footer counter ("N / M")
+            # reflects position in the whole book rather than in the chapter.
+            book_total_pages = 0
+            for csv_path in sorted(enriched_csv_dir.glob("chapter_*.csv")):
+                with csv_path.open(encoding="utf-8", newline="") as cf:
+                    book_total_pages += sum(
+                        1 for row in csv.DictReader(cf)
+                        if (row.get("word") or "").strip()
+                        and (row.get("definition") or "").strip()
+                    )
+
             # Phase B2: render exactly one variant.
             darkmode = bool(config.get("bmp_dark") or config.get("darkmode"))
             if darkmode:
@@ -623,6 +649,8 @@ def _run_job(job_id: str, config: dict) -> None:
                 update_status=update,
                 font_path=config.get("bmp_font"),
                 source_lang=bmp_source,
+                page_offset=0,
+                book_total_pages=book_total_pages,
             )
             update(
                 phase="zipping",

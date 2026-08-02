@@ -314,13 +314,30 @@ def draw_body_lines(draw, lines: list[str], font, x: int, y: int,
 
 # ----------------------------- Card rendering -----------------------------
 
-def format_pronunciation(pronunciation: str, max_variants: int = 2) -> str:
+def format_pronunciation(pronunciation: str) -> str:
+    """Render IPA pronunciations one per line.
+
+    Each variant is wrapped in slashes (e.g. ``/kæt/``) and joined with
+    newlines so render_card can draw them on separate rows. Empty parts
+    are dropped. No truncation marker — every pronunciation StarDict /
+    Ollama provides is rendered verbatim, since the `…` suffix in the
+    previous version read like an extra (non-existent) pronunciation.
+    """
     variants = [part.strip().strip("/") for part in pronunciation.split(" / ")]
     variants = [part for part in variants if part]
-    visible = [f"/{part}/" for part in variants[:max_variants]]
-    if len(variants) > max_variants:
-        visible.append("…")
-    return "  ".join(visible)
+    return "\n".join(f"/{part}/" for part in variants)
+
+
+def ensure_terminator(text: str, terminator: str = ".") -> str:
+    """Ensure the text ends with a sentence terminator.
+
+    Strips trailing whitespace first; leaves existing terminators
+    (``.``, ``!``, ``?``) and the truncation marker (``…``) alone.
+    """
+    text = text.rstrip()
+    if not text or text[-1] in ".!?…":
+        return text
+    return text + terminator
 
 
 # Section titles rendered on each card. The keys match the canonical English
@@ -446,21 +463,30 @@ def render_card(
         y = draw_section_title(
             draw, titles["pronunciation"], title_font, y, inner_x_left, inner_x_right, fill=fg
         )
-        if measure(ipa_text, ipa_font)[0] > content_w:
-            for size in [s(24), s(22), s(20)]:
-                candidate = find_font("serif", size, italic=True)
-                if measure(ipa_text, candidate)[0] <= content_w:
-                    ipa_font = candidate
-                    break
-        draw.text(((width - measure(ipa_text, ipa_font)[0]) // 2, y), ipa_text,
-                  font=ipa_font, fill=fg)
-        y += measure(ipa_text, ipa_font)[1] + s(28)
+        # Each pronunciation goes on its own line, drawn individually
+        # because Pillow's draw.text does not honour embedded newlines.
+        for line in ipa_text.split("\n"):
+            current_font = ipa_font
+            if measure(line, current_font)[0] > content_w:
+                for size in [s(24), s(22), s(20)]:
+                    candidate = find_font("serif", size, italic=True)
+                    if measure(line, candidate)[0] <= content_w:
+                        current_font = candidate
+                        break
+            draw.text(
+                ((width - measure(line, current_font)[0]) // 2, y),
+                line, font=current_font, fill=fg,
+            )
+            y += measure(line, current_font)[1] + s(4)
+        y += s(24)  # gap before next section
 
     # ----------- Definition -----------
     y = draw_section_title(
         draw, titles["definition"], title_font, y, inner_x_left, inner_x_right, fill=fg
     )
-    def_lines = truncate_lines(definition, body_font, content_w, max_lines=4)
+    def_lines = truncate_lines(
+        ensure_terminator(definition), body_font, content_w, max_lines=4
+    )
     y = draw_body_lines(draw, def_lines, body_font, inner_x_left, y, content_w,
                         line_spacing=8, fill=fg)
     y += s(28)  # gap before next section
@@ -470,7 +496,9 @@ def render_card(
         y = draw_section_title(
             draw, titles["usage"], title_font, y, inner_x_left, inner_x_right, fill=fg
         )
-        ex_lines = truncate_lines(example, body_font, content_w, max_lines=4)
+        ex_lines = truncate_lines(
+            ensure_terminator(example), body_font, content_w, max_lines=4
+        )
         y = draw_body_lines(draw, ex_lines, body_font, inner_x_left, y, content_w,
                             line_spacing=8, fill=fg)
         y += s(28)
@@ -481,7 +509,8 @@ def render_card(
             draw, titles["synonyms"], title_font, y, inner_x_left, inner_x_right, fill=fg
         )
         syn_lines = truncate_lines(
-            synonyms, body_italic_font, content_w, max_lines=4, italic=True
+            ensure_terminator(synonyms), body_italic_font, content_w,
+            max_lines=4, italic=True,
         )
         y = draw_body_lines(draw, syn_lines, body_italic_font, inner_x_left, y, content_w,
                             line_spacing=8, fill=fg)

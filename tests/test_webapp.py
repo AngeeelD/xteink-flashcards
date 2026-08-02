@@ -446,6 +446,60 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(meta["chapters_total"], 3)
         self.assertEqual(meta["chapters_done"], meta["chapters_total"])
 
+    def test_render_uses_book_level_page_counter(self):
+        """When a job has 3 chapters with 1 card each, the per-card footer
+        counter reflects position in the whole book (1/3, 2/3, 3/3) rather
+        than per-chapter (1/1, 1/1, 1/1)."""
+        captured: list[dict] = []
+
+        def record_render(**kwargs):
+            captured.append({
+                "page_no": kwargs.get("page_no"),
+                "total_pages": kwargs.get("total_pages"),
+            })
+            kwargs["output_path"].write_bytes(b"bmp")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            jobs_dir = Path(tmpdir)
+            upload_dir = Path(tmpdir) / "uploads"
+            upload_dir.mkdir()
+            with patch.object(webapp, "JOBS_DIR", jobs_dir), \
+                 patch.object(webapp, "UPLOADS_DIR", upload_dir), \
+                 patch.object(
+                     webapp, "ef_ollama_generate", return_value="word\nrefactoring"
+                 ), patch.object(
+                     webapp, "enrich_word",
+                     return_value=("noun. process in which code is refactored", [], ""),
+                 ), patch.object(
+                     webapp, "render_card", side_effect=record_render
+                 ):
+                job_id = "bookcount1"
+                epub_path = upload_dir / f"{job_id}.epub"
+                with zipfile.ZipFile(epub_path, "w") as archive:
+                    for n in (1, 2, 3):
+                        archive.writestr(
+                            f"chapter_{n:03d}.xhtml",
+                            "<p>refactoring " + "context " * 40 + "</p>",
+                        )
+
+                config = {
+                    "csv_enabled": False,
+                    "bmp_enabled": True,
+                    "bmp_source": "en",
+                    "bmp_items": 1,
+                    "bmp_device": "x3",
+                    "bmp_dark": False,
+                    "bmp_with_examples": False,
+                    "device": "x3",
+                    "original_filename": "book.epub",
+                }
+                webapp._run_job(job_id, dict(config))
+
+        self.assertEqual(len(captured), 3)
+        # Three chapters, one card each → counters should be 1/3, 2/3, 3/3.
+        self.assertEqual([c["page_no"] for c in captured], [1, 2, 3])
+        self.assertTrue(all(c["total_pages"] == 3 for c in captured))
+
 
 def _stub_bmp_render(**kwargs):
     """Replace render_card with a function that writes a tiny placeholder BMP."""
