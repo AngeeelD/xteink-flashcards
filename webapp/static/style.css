@@ -357,6 +357,138 @@ article .phase {
   color: var(--c-danger);
 }
 
+/* ---------- Active job link ---------- */
+article > header a.job-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-3);
+  text-decoration: none;
+  color: inherit;
+  flex: 1;
+}
+
+article > header a.job-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- Recent jobs carousel ---------- */
+.recent-jobs {
+  margin-top: var(--s-6);
+}
+
+.recent-jobs h2 {
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--c-muted);
+  margin: 0 0 var(--s-3) 0;
+}
+
+.recent-jobs-strip {
+  display: flex;
+  gap: var(--s-3);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: var(--s-3);
+  /* Hide scrollbar on Webkit while keeping scroll functionality. */
+  scrollbar-width: thin;
+}
+
+.recent-jobs-strip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.recent-jobs-strip::-webkit-scrollbar-thumb {
+  background: var(--c-border);
+  border-radius: 3px;
+}
+
+.recent-job-card {
+  flex: 0 0 160px;
+  scroll-snap-align: start;
+  display: block;
+  text-decoration: none;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: var(--bw) solid var(--c-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: transform 100ms ease-out, box-shadow 100ms ease-out;
+}
+
+.recent-job-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 4px 4px 0 0 var(--c-text);
+}
+
+.recent-job-thumb {
+  width: 100%;
+  height: 200px;
+  background: var(--c-device);
+  border-bottom: var(--bw) solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.recent-job-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.recent-job-thumb-fallback {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--c-muted);
+}
+
+.recent-job-meta {
+  padding: var(--s-3);
+}
+
+.recent-job-name {
+  font-family: var(--f-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 var(--s-1) 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-job-date {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  color: var(--c-muted);
+  margin: 0 0 var(--s-2) 0;
+}
+
+.recent-job-stats {
+  font-family: var(--f-mono);
+  font-size: 0.65rem;
+  color: var(--c-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .recent-job-card {
+    flex: 0 0 140px;
+  }
+  .recent-job-thumb {
+    height: 175px;
+  }
+}
+
 /* ---------- Device frame around the live preview ---------- */
 /* A pure-CSS approximation of the Xteink X3 / X4 plastic bezel so the
  * user sees the card roughly the same way it sits on-device. The screen

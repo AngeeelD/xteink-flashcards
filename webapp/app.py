@@ -747,11 +747,13 @@ def index():
     active = _read_meta(_active_job_id) if _active_job_id else None
     fonts = _fonts_for_picker()
     default_font = _resolve_default_font()
+    recent_jobs = _recent_jobs(limit=6)
     return render_template(
         "index.html",
         active_job=active,
         fonts=fonts,
         default_font=default_font,
+        recent_jobs=recent_jobs,
     )
 
 
@@ -793,6 +795,78 @@ def _safe_font_filename(filename: str) -> str:
     else collapses to underscores. Prevents path traversal."""
     name = Path(filename).name
     return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "custom.ttf"
+
+
+def _recent_jobs(limit: int = 6) -> list[dict]:
+    """List recent completed jobs for the history strip on the landing page.
+
+    Each entry carries the metadata needed to render a thumbnail card:
+    id (for the link), book_name (cleaned from the original upload),
+    finished_at (ISO timestamp, used by the relative-time filter),
+    flashcard / bmp counts, and the path to the first BMP for the
+    thumbnail endpoint.
+    """
+    if not JOBS_DIR.exists():
+        return []
+    jobs: list[dict] = []
+    for job_dir in JOBS_DIR.iterdir():
+        if not job_dir.is_dir():
+            continue
+        meta_path = job_dir / "meta.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if meta.get("status") != "done":
+            continue
+        # Prefer the light variant for the thumbnail; fall back to dark.
+        thumbnail: str | None = None
+        for sub in ("bmp", "bmp_dark"):
+            bmp_dir = job_dir / sub
+            if not bmp_dir.exists():
+                continue
+            bmps = sorted(bmp_dir.glob("*.bmp"))
+            if bmps:
+                thumbnail = str(bmps[0])
+                break
+        jobs.append({
+            "id": meta.get("id", job_dir.name),
+            "book_name": meta.get("original_filename") or job_dir.name,
+            "finished_at": meta.get("finished_at", ""),
+            "flashcards_count": meta.get("flashcards_count", 0),
+            "bmp_count": (
+                meta.get("bmp_count")
+                or meta.get("bmp_light_count")
+                or meta.get("bmp_dark_count")
+                or 0
+            ),
+            "thumbnail": thumbnail,
+        })
+    jobs.sort(key=lambda j: j.get("finished_at") or "", reverse=True)
+    return jobs[:limit]
+
+
+@app.template_filter("relative_time")
+def _relative_time_filter(iso_string: str) -> str:
+    """Render an ISO timestamp as a short relative string ('3d ago')."""
+    if not iso_string:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return iso_string
+    delta = datetime.now(timezone.utc) - dt
+    if delta.days >= 1:
+        return f"{delta.days}d ago"
+    hours = delta.seconds // 3600
+    if hours >= 1:
+        return f"{hours}h ago"
+    minutes = delta.seconds // 60
+    if minutes >= 1:
+        return f"{minutes}m ago"
+    return "just now"
 
 
 @app.route("/upload", methods=["POST"])
@@ -854,6 +928,45 @@ def job_status(job_id):
     if meta.get("status") == "not_found":
         return jsonify({"status": "not_found"}), 404
     return jsonify(meta)
+
+
+@app.route("/job/<job_id>/thumbnail.png")
+def job_thumbnail(job_id):
+    """Render the first BMP of a completed job as PNG.
+
+    Used by the recent-jobs carousel on the landing page. PNG over BMP
+    because (a) browsers display PNG more consistently and (b) Pillow
+    re-encodes losslessly so the thumbnails stay crisp at small sizes.
+    The BMP is converted on demand; a future optimisation could cache
+    the PNG alongside the BMP at render time.
+    """
+    job_dir = JOBS_DIR / job_id
+    if not job_dir.is_dir():
+        abort(404)
+    bmp_path: Path | None = None
+    for sub in ("bmp", "bmp_dark"):
+        candidate_dir = job_dir / sub
+        if not candidate_dir.is_dir():
+            continue
+        candidates = sorted(candidate_dir.glob("*.bmp"))
+        if candidates:
+            bmp_path = candidates[0]
+            break
+    if bmp_path is None:
+        abort(404)
+    import tempfile as _tempfile
+    with _tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        with Image.open(bmp_path) as img:
+            img.save(tmp_path, format="PNG")
+        return send_file(
+            tmp_path,
+            mimetype="image/png",
+            max_age=300,
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 @app.route("/download/<job_id>/<kind>")

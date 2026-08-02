@@ -144,8 +144,10 @@
 {% if active_job %}
 <article aria-label="Active job">
   <header>
-    <strong>Active job <code>{{ active_job.id }}</code></strong>
-    <span class="phase">{{ active_job.status }} · {{ active_job.phase_label }}</span>
+    <a href="/job/{{ active_job.id }}" class="job-link">
+      <strong>Active job <code>{{ active_job.id }}</code></strong>
+      <span class="phase">{{ active_job.status }} · {{ active_job.phase_label }}</span>
+    </a>
   </header>
   {% if active_job.status == 'done' %}
     {% if active_job.flashcards_zip %}
@@ -159,6 +161,34 @@
     {% endif %}
   {% endif %}
 </article>
+{% endif %}
+
+{% if recent_jobs %}
+<section class="recent-jobs" aria-label="Recent jobs">
+  <h2>Recent jobs</h2>
+  <div class="recent-jobs-strip">
+    {% for job in recent_jobs %}
+    <a href="/job/{{ job.id }}" class="recent-job-card">
+      <div class="recent-job-thumb">
+        {% if job.thumbnail %}
+          <img src="/job/{{ job.id }}/thumbnail.png"
+               alt="First card of {{ job.book_name }}"
+               loading="lazy">
+        {% else %}
+          <span class="recent-job-thumb-fallback">no preview</span>
+        {% endif %}
+      </div>
+      <div class="recent-job-meta">
+        <p class="recent-job-name" title="{{ job.book_name }}">{{ job.book_name }}</p>
+        <p class="recent-job-date">{{ job.finished_at | relative_time }}</p>
+        <p class="recent-job-stats">
+          {{ job.flashcards_count }} cards · {{ job.bmp_count }} bmps
+        </p>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
 {% endif %}
 
 <script>

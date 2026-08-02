@@ -703,6 +703,180 @@ class CustomFontTests(unittest.TestCase):
         self.assertTrue((self._fonts_dir / "PersistSans.ttf").exists())
 
 
+class RecentJobsTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._jobs_dir = Path(self._tmpdir.name) / "jobs"
+        self._jobs_dir.mkdir()
+        self._patch = patch.object(webapp, "JOBS_DIR", self._jobs_dir)
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        self._tmpdir.cleanup()
+
+    def _make_job(self, job_id, *, finished_at, status="done",
+                  bmp_subdir="bmp", flash_count=3, bmp_count=3,
+                  original_filename=None):
+        from PIL import Image as _PILImage
+        job_dir = self._jobs_dir / job_id
+        job_dir.mkdir()
+        meta = {
+            "id": job_id,
+            "status": status,
+            "finished_at": finished_at,
+            "original_filename": original_filename or f"{job_id}.epub",
+            "flashcards_count": flash_count,
+            "bmp_count": bmp_count,
+            "bmp_dark_count": None,
+            "bmp_light_count": bmp_count if bmp_subdir == "bmp" else None,
+        }
+        (job_dir / "meta.json").write_text(json.dumps(meta))
+        if bmp_subdir:
+            bmp_dir = job_dir / bmp_subdir
+            bmp_dir.mkdir(exist_ok=True)
+            # Write a real (tiny) BMP so Pillow can identify it.
+            img = _PILImage.new("1", (8, 8), 255)
+            img.save(bmp_dir / "chapter_001_000_first.bmp", format="BMP")
+        return job_dir
+
+    def test_recent_jobs_returns_done_jobs_sorted_descending(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        self._make_job("older", finished_at=(now - timedelta(days=5)).isoformat())
+        self._make_job("newer", finished_at=(now - timedelta(days=1)).isoformat())
+        self._make_job("middle", finished_at=(now - timedelta(days=3)).isoformat())
+
+        jobs = webapp._recent_jobs(limit=10)
+
+        self.assertEqual([j["id"] for j in jobs], ["newer", "middle", "older"])
+
+    def test_recent_jobs_skips_running_and_errored_jobs(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        self._make_job("done-job",
+                       finished_at=(now - timedelta(hours=2)).isoformat(),
+                       status="done")
+        self._make_job("running-job",
+                       finished_at="",
+                       status="running")
+        self._make_job("errored-job",
+                       finished_at=(now - timedelta(hours=1)).isoformat(),
+                       status="error")
+
+        jobs = webapp._recent_jobs(limit=10)
+
+        self.assertEqual([j["id"] for j in jobs], ["done-job"])
+
+    def test_recent_jobs_finds_thumbnail_in_bmp_dir(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        self._make_job("with-thumb",
+                       finished_at=(now - timedelta(hours=1)).isoformat(),
+                       bmp_subdir="bmp")
+
+        jobs = webapp._recent_jobs(limit=10)
+
+        self.assertEqual(jobs[0]["thumbnail"].split("/")[-1], "chapter_001_000_first.bmp")
+
+    def test_recent_jobs_falls_back_to_dark_bmp_when_light_missing(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        self._make_job("dark-only",
+                       finished_at=(now - timedelta(hours=1)).isoformat(),
+                       bmp_subdir="bmp_dark")
+
+        jobs = webapp._recent_jobs(limit=10)
+
+        self.assertIn("bmp_dark", jobs[0]["thumbnail"])
+
+    def test_relative_time_filter(self):
+        from datetime import datetime, timezone, timedelta
+        app = webapp.app
+        # Verify the Jinja filter is registered.
+        self.assertIn("relative_time", app.jinja_env.filters)
+        filter_fn = app.jinja_env.filters["relative_time"]
+        now = datetime.now(timezone.utc)
+        self.assertEqual(
+            filter_fn((now - timedelta(days=3)).isoformat()), "3d ago",
+        )
+        self.assertEqual(
+            filter_fn((now - timedelta(hours=4)).isoformat()), "4h ago",
+        )
+        self.assertEqual(
+            filter_fn((now - timedelta(minutes=12)).isoformat()), "12m ago",
+        )
+        self.assertEqual(filter_fn(now.isoformat()), "just now")
+        self.assertEqual(filter_fn(""), "")
+
+    def test_thumbnail_endpoint_serves_png(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        self._make_job("with-bmps",
+                       finished_at=(now - timedelta(hours=1)).isoformat())
+
+        with webapp.app.test_client() as client:
+            response = client.get("/job/with-bmps/thumbnail.png")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "image/png")
+        self.assertTrue(response.get_data().startswith(b"\x89PNG"))
+
+    def test_thumbnail_endpoint_returns_404_when_no_bmps(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        # Make a job dir with meta.json but no BMPs.
+        job_dir = self._jobs_dir / "no-bmps"
+        job_dir.mkdir()
+        (job_dir / "meta.json").write_text(json.dumps({
+            "id": "no-bmps",
+            "status": "done",
+            "finished_at": now.isoformat(),
+        }))
+
+        with webapp.app.test_client() as client:
+            response = client.get("/job/no-bmps/thumbnail.png")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_thumbnail_endpoint_returns_404_for_missing_job(self):
+        with webapp.app.test_client() as client:
+            response = client.get("/job/does-not-exist/thumbnail.png")
+        self.assertEqual(response.status_code, 404)
+
+    def test_index_route_renders_recent_jobs_carousel(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        self._make_job("alpha",
+                       finished_at=(now - timedelta(hours=1)).isoformat(),
+                       original_filename="alpha-book.epub")
+
+        with patch.object(webapp, "_active_job_id", None), \
+             patch.object(webapp, "_resolve_default_font", return_value=None), \
+             patch.object(webapp, "list_available_fonts", return_value=[]):
+            response = webapp.app.test_client().get("/")
+            html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Recent jobs", html)
+        self.assertIn("alpha-book.epub", html)
+        self.assertIn("/job/alpha/thumbnail.png", html)
+
+    def test_index_route_makes_active_job_clickable(self):
+        with patch.object(webapp, "_active_job_id", "abc123"), \
+             patch.object(webapp, "_read_meta",
+                          return_value={"id": "abc123", "status": "running",
+                                        "phase_label": "Detecting chapters...",
+                                        "original_filename": "x.epub"}), \
+             patch.object(webapp, "_recent_jobs", return_value=[]), \
+             patch.object(webapp, "_resolve_default_font", return_value=None), \
+             patch.object(webapp, "list_available_fonts", return_value=[]):
+            response = webapp.app.test_client().get("/")
+            html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/job/abc123"', html)
+        self.assertIn("class=\"job-link\"", html)
+
+
 class PreviewEndpointTests(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
