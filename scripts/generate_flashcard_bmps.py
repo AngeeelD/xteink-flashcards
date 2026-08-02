@@ -253,7 +253,8 @@ def truncate_lines(text: str, font: ImageFont.FreeTypeFont,
 
 def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH_DEFAULT,
                        fill: int = 0, shadow: bool = False, dy: int = 1,
-                       family: str = "serif", bold: bool = False) -> int:
+                       family: str = "serif", bold: bool = False
+                       ) -> tuple[int, ImageFont.FreeTypeFont]:
     """Draw text horizontally centered on `width`.
 
     Safe-area behaviour: if `text` would overflow the card's content area
@@ -261,10 +262,15 @@ def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH_DEFAULT
     font is shrunk in 4-pt steps until the text fits or hits a 14-pt floor.
     Without this, long words or wide user-selected fonts can poke past
     the inner border and land outside the bezel.
+
+    Returns ``(y_after_draw, current_font)`` so callers can derive layout
+    positions from the same font the renderer actually used (after any
+    shrink-to-fit pass). Returning the font is the only way to anchor the
+    decorative underline to a baseline that survives font changes.
     """
     text = text.strip()
     if not text:
-        return y
+        return y, font
     safe_width = width - 2 * OUTER_MARGIN - 2 * CARD_PADDING
     current_font = font
     w, h = measure(text, current_font)
@@ -282,7 +288,7 @@ def draw_centered_text(draw, text: str, font, y: int, width: int = WIDTH_DEFAULT
         # subtle 1-pixel shadow (in 1-bit, this just outlines slightly)
         draw.text((x + dy, y + dy), text, font=current_font, fill=fill)
     draw.text((x, y), text, font=current_font, fill=fill)
-    return y + h
+    return y + h, current_font
 
 
 def draw_section_title(draw, text: str, font, y: int,
@@ -446,11 +452,19 @@ def render_card(
     content_w = inner_x_right - inner_x_left
 
     # ----------- Word at top (serif, centered) -----------
-    y = OUTER_MARGIN + CARD_PADDING + 14
-    y = draw_centered_text(draw, word, word_font, y, width=width, fill=fg)
-    # Underline (thin, decorative, classical dictionary style)
-    underline_y = y + 16
-    line_w_min, _ = measure(word, word_font)
+    word_y = OUTER_MARGIN + CARD_PADDING + 14
+    y, final_word_font = draw_centered_text(
+        draw, word, word_font, word_y, width=width, fill=fg,
+    )
+    # Underline position is anchored to the actual baseline of the
+    # rendered word (the font we ended up with after any shrink-to-fit),
+    # so the gap to the PRONUNCIATION title below stays constant
+    # regardless of whether the word has descenders. Words with
+    # descenders will cross the underline visually — that's intentional
+    # and matches typical dictionary styling.
+    ascent, _ = final_word_font.getmetrics()
+    underline_y = word_y + ascent + 4
+    line_w_min, _ = measure(word, final_word_font)
     line_w = max(line_w_min + 40, 80)
     cx = width // 2
     draw.line([(cx - line_w // 2, underline_y), (cx + line_w // 2, underline_y)],

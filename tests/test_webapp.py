@@ -259,6 +259,62 @@ class WebBmpPipelineTests(unittest.TestCase):
         self.assertEqual(result, (0, 1))
         self.assertFalse(any(enriched_dir.glob("chapter_*.csv")))
 
+    def test_dedupe_words_drops_case_insensitive_duplicates(self):
+        self.assertEqual(
+            webapp._dedupe_words(["Bear", "bear", "BEAR", "cat"]),
+            ["Bear", "cat"],
+        )
+
+    def test_dedupe_words_preserves_first_seen_order(self):
+        self.assertEqual(
+            webapp._dedupe_words(["zebra", "Apple", "apple", "banana"]),
+            ["zebra", "Apple", "banana"],
+        )
+
+    def test_dedupe_words_handles_empty_list(self):
+        self.assertEqual(webapp._dedupe_words([]), [])
+
+    def test_enrichment_dedupes_repeated_words_from_ollama(self):
+        """If Ollama returns the same word twice (or different cases),
+        the enriched CSV contains it only once — otherwise we'd render
+        duplicate BMPs for the same word."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            # Custom EPUB that mentions the words we're going to feed.
+            epub_path = root / "job-id.epub"
+            with zipfile.ZipFile(epub_path, "w") as archive:
+                archive.writestr(
+                    "chapter_001.xhtml",
+                    "<p>refactoring " + "context " * 40 + "</p>",
+                )
+            enriched_dir = root / "enriched"
+
+            with patch.object(
+                webapp, "ef_ollama_generate",
+                # Same word twice (different case) plus another word.
+                return_value="word\nrefactoring\nREFACTORING",
+            ), patch.object(
+                webapp, "enrich_word",
+                return_value=("noun. process in which code is refactored", [], ""),
+            ):
+                webapp._enrich_per_chapter(
+                    epub_path=epub_path,
+                    book_name="Book",
+                    chapters=[("chapter_001", "chapter_001.xhtml")],
+                    source="en",
+                    items=5,
+                    with_examples=False,
+                    enriched_csv_outdir=enriched_dir,
+                    sd=object(),
+                    update_status=lambda **kwargs: None,
+                )
+
+            csv_text = (enriched_dir / "chapter_001.csv").read_text()
+            # The second occurrence should not appear; only the first-seen
+            # spelling remains.
+            self.assertEqual(csv_text.count("refactoring"), 1)
+            self.assertNotIn("REFACTORING", csv_text)
+
 
 class DownloadTests(unittest.TestCase):
     def test_does_not_create_empty_archive(self):

@@ -155,6 +155,25 @@ def _filter_chapters(
     return filtered
 
 
+def _dedupe_words(words: list[str]) -> list[str]:
+    """Drop duplicate words case-insensitively, preserving first-seen order.
+
+    Ollama sometimes returns the same word twice in a single response
+    (different senses or just hallucinated repetition). StarDict lookups
+    are deterministic so the second occurrence wastes an enrichment
+    cycle and produces a duplicate card on the BMP.
+    """
+    seen: set[str] = set()
+    unique: list[str] = []
+    for word in words:
+        key = word.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(word)
+    return unique
+
+
 def _coerce_bool(value: object) -> bool:
     """Coerce form values to bool. HTML checkboxes send 'on' when checked."""
     if isinstance(value, bool):
@@ -309,6 +328,18 @@ def _generate_bilingual_per_chapter(
                 target_label=target_label,
             )
             rows = filter_bi_rows(rows, text)[:items]
+            # Drop duplicate source-language entries (Ollama occasionally
+            # repeats words). Keep the first-seen pair for each unique
+            # source so the CSV doesn't have two rows that flashcard to
+            # the same word.
+            seen_sources: set[str] = set()
+            deduped_rows: list[tuple[str, str]] = []
+            for src, tgt in rows:
+                if src.casefold() in seen_sources:
+                    continue
+                seen_sources.add(src.casefold())
+                deduped_rows.append((src, tgt))
+            rows = deduped_rows[:items]
             if rows:
                 break
         if not rows:
@@ -381,6 +412,9 @@ def _enrich_per_chapter(
             continue
         words = parse_vocab_single_column(response_enr)
         words = filter_words_by_source_text(words, text)[:items]
+        # Dedup case-insensitively: Ollama sometimes repeats the same
+        # word, and StarDict would otherwise enrich the same target twice.
+        words = _dedupe_words(words)
 
         enriched: list[dict] = []
         for word in words:
